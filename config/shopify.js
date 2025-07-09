@@ -6,35 +6,33 @@ class ShopifyAPI {
     this.shopUrl = process.env.SHOPIFY_SHOP_URL;
     this.accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
     this.apiVersion = process.env.SHOPIFY_API_VERSION || '2024-01';
-    
-    if (!this.shopUrl || !this.accessToken) {
-      throw new Error('Missing Shopify configuration. Please check your .env file.');
-    }
-    
-    this.baseURL = `https://${this.shopUrl}/admin/api/${this.apiVersion}`;
-    this.headers = {
-      'X-Shopify-Access-Token': this.accessToken,
-      'Content-Type': 'application/json',
-    };
+    this.baseUrl = `https://${this.shopUrl}/admin/api/${this.apiVersion}`;
   }
 
   async makeRequest(method, endpoint, data = null) {
     try {
       const config = {
         method,
-        url: `${this.baseURL}${endpoint}`,
-        headers: this.headers,
-        data,
+        url: `${this.baseUrl}${endpoint}`,
+        headers: {
+          'X-Shopify-Access-Token': this.accessToken,
+          'Content-Type': 'application/json'
+        }
       };
+
+      if (data) {
+        config.data = data;
+      }
 
       const response = await axios(config);
       return response.data;
     } catch (error) {
-      console.error(`Shopify API Error (${method} ${endpoint}):`, error.response?.data || error.message);
+      console.error(`Shopify API Error (${method} ${endpoint}):`, error.response?.status, error.response?.data?.errors || error.message);
       throw error;
     }
   }
 
+  // Product methods
   async createProduct(productData) {
     return this.makeRequest('POST', '/products.json', { product: productData });
   }
@@ -43,30 +41,69 @@ class ShopifyAPI {
     return this.makeRequest('PUT', `/products/${productId}.json`, { product: productData });
   }
 
-  async getProductByHandle(handle) {
-    return this.makeRequest('GET', `/products.json?handle=${handle}`);
+  async getProduct(productId) {
+    return this.makeRequest('GET', `/products/${productId}.json`);
   }
 
-  async createTranslation(resourceType, resourceId, locale, translationData) {
-    return this.makeRequest('POST', `/${resourceType}/${resourceId}/translations.json`, {
-      translation: {
-        locale,
-        ...translationData
-      }
-    });
+  async getProducts(limit = 50) {
+    return this.makeRequest('GET', `/products.json?limit=${limit}`);
   }
 
-  async updateTranslation(resourceType, resourceId, locale, translationData) {
-    return this.makeRequest('PUT', `/${resourceType}/${resourceId}/translations/${locale}.json`, {
-      translation: {
-        locale,
-        ...translationData
+  // Metafield methods
+  async createMetafield(ownerResource, ownerId, metafieldData) {
+    return this.makeRequest('POST', `/${ownerResource}/${ownerId}/metafields.json`, { metafield: metafieldData });
+  }
+
+  async updateMetafield(metafieldId, metafieldData) {
+    return this.makeRequest('PUT', `/metafields/${metafieldId}.json`, { metafield: metafieldData });
+  }
+
+  async getMetafields(ownerResource, ownerId) {
+    return this.makeRequest('GET', `/${ownerResource}/${ownerId}/metafields.json`);
+  }
+
+  // Translation methods - using the correct endpoint
+  async createTranslation(translationData) {
+    // Try the standard translations endpoint first
+    try {
+      return this.makeRequest('POST', '/translations.json', { translation: translationData });
+    } catch (error) {
+      if (error.response?.status === 404) {
+        console.warn('⚠️  Standard translations endpoint not available. This might require the Shopify Translate & Adapt app.');
+        console.warn('   You may need to install the app or use a different approach for translations.');
+        throw new Error('Translations endpoint not available. Please install Shopify Translate & Adapt app.');
       }
-    });
+      throw error;
+    }
+  }
+
+  async updateTranslation(translationId, translationData) {
+    try {
+      return this.makeRequest('PUT', `/translations/${translationId}.json`, { translation: translationData });
+    } catch (error) {
+      if (error.response?.status === 404) {
+        console.warn('⚠️  Standard translations endpoint not available.');
+        throw new Error('Translations endpoint not available.');
+      }
+      throw error;
+    }
   }
 
   async getTranslations(resourceType, resourceId) {
-    return this.makeRequest('GET', `/${resourceType}/${resourceId}/translations.json`);
+    try {
+      return this.makeRequest('GET', `/${resourceType}/${resourceId}/translations.json`);
+    } catch (error) {
+      if (error.response?.status === 404) {
+        console.warn('⚠️  Standard translations endpoint not available.');
+        return { translations: [] };
+      }
+      throw error;
+    }
+  }
+
+  // Shop info
+  async getShopInfo() {
+    return this.makeRequest('GET', '/shop.json');
   }
 }
 

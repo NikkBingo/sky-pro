@@ -1,118 +1,384 @@
-const ShopifyAPI = require('./config/shopify');
 const XMLParser = require('./utils/xml-parser');
+const ShopifyAPI = require('./config/shopify');
+const { createShopifyProduct, splitProductBySize } = require('./config/field-mapping');
 require('dotenv').config();
+
+// Parse command line arguments
+const args = process.argv.slice(2);
+const options = {
+  dryRun: args.includes('--dry-run') || args.includes('-d'),
+  limit: parseInt(args.find(arg => arg.startsWith('--limit='))?.split('=')[1]) || 10
+};
 
 class ProductImporter {
   constructor() {
-    this.shopify = new ShopifyAPI();
     this.xmlParser = new XMLParser();
-    this.importedProducts = new Map(); // Track imported products by code
+    this.shopifyAPI = new ShopifyAPI();
+    this.englishFeedUrl = process.env.ENGLISH_FEED_URL || 'https://www.skypro.fi/tuotteet/products-en.xml';
   }
 
-  async importProducts() {
+  async importProducts(options = {}) {
+    const { dryRun = options.dryRun || false, limit = options.limit || 10 } = options;
+    
+    // Define categories to import
+    const categoriesToImport = [
+      'Shopping Bags',
+      'Headwear and accessories', 
+      'Sweaters',
+      'T-shirts',
+      'Trousers and jog pants',
+      'Polos'
+    ];
+    
     try {
-      console.log('🚀 Starting Sky Pro product import...');
-      
-      // Fetch and parse the English XML feed
-      const englishFeedUrl = process.env.ENGLISH_FEED_URL || 'https://www.skypro.fi/tuotteet/products-en.xml';
-      const xmlData = await this.xmlParser.fetchAndParseXML(englishFeedUrl);
+      console.log('📥 Fetching XML feed...');
+      const xmlData = await this.xmlParser.fetchAndParseXML(this.englishFeedUrl);
       
       if (!xmlData.mainostekstiilitcom || !xmlData.mainostekstiilitcom.products) {
         throw new Error('Invalid XML structure: missing products data');
       }
 
-      const products = xmlData.mainostekstiilitcom.products.product;
-      const productArray = Array.isArray(products) ? products : [products];
+      const allProducts = xmlData.mainostekstiilitcom.products.product;
+      const allProductArray = Array.isArray(allProducts) ? allProducts : [allProducts];
       
-      console.log(`📦 Found ${productArray.length} products in the feed`);
+      console.log(`📊 Found ${allProductArray.length} total products in feed`);
       
-      // Limit products for testing if MAX_PRODUCTS is set
-      const maxProducts = process.env.MAX_PRODUCTS ? parseInt(process.env.MAX_PRODUCTS) : productArray.length;
-      const productsToImport = productArray.slice(0, maxProducts);
+      // Filter products by selected categories
+      const filteredProducts = allProductArray.filter(product => {
+        const category = product.categories?.category?.[0]?.name;
+        return category && categoriesToImport.includes(category);
+      });
       
-      console.log(`🔄 Importing ${productsToImport.length} products...`);
+      console.log(`🎯 Found ${filteredProducts.length} products in selected categories: ${categoriesToImport.join(', ')}`);
+      
+      const productArray = filteredProducts;
+      console.log(`🔄 Processing ${Math.min(limit, productArray.length)} products...`);
       
       let successCount = 0;
       let errorCount = 0;
       
-      for (const productXml of productsToImport) {
+      for (let i = 0; i < Math.min(limit, productArray.length); i++) {
+        const xmlProduct = productArray[i];
+        
         try {
-          await this.importProduct(productXml);
-          successCount++;
-          console.log(`✅ Imported: ${productXml.title} (${productXml.code})`);
+          console.log(`\n📦 Processing product ${i + 1}/${Math.min(limit, productArray.length)}: ${xmlProduct.title || xmlProduct.code}`);
+          
+          // Check if product needs splitting (over 100 variants)
+          const shopifyProducts = splitProductBySize(xmlProduct);
+          
+          if (dryRun) {
+            console.log('🔍 DRY RUN - Would create products:');
+            shopifyProducts.forEach((product, index) => {
+              console.log(`Product ${index + 1}:`);
+              console.log(JSON.stringify(product, null, 2));
+            });
+          } else {
+            // Process each split product
+            for (let j = 0; j < shopifyProducts.length; j++) {
+              const shopifyProduct = shopifyProducts[j];
+              
+              // Check if product already exists
+              const existingProduct = await this.findExistingProduct(shopifyProduct.handle);
+              
+              if (existingProduct) {
+                console.log(`🔄 Updating existing product: ${existingProduct.title}`);
+                await this.updateProduct(existingProduct.id, shopifyProduct);
+              } else {
+                console.log(`✨ Creating new product: ${shopifyProduct.title}`);
+                await this.createProduct(shopifyProduct);
+              }
+            }
+            
+            successCount += shopifyProducts.length;
+          }
+          
         } catch (error) {
+          console.error(`❌ Error processing product ${xmlProduct.code || xmlProduct.id}:`, error.message);
           errorCount++;
-          console.error(`❌ Failed to import ${productXml.title} (${productXml.code}):`, error.message);
         }
         
-        // Add a small delay to avoid rate limiting
-        await this.delay(1000);
+        // Rate limiting - pause between requests
+        if (!dryRun && i < Math.min(limit, productArray.length) - 1) {
+          await this.sleep(2000); // 2 second pause to prevent rate limiting
+        }
       }
       
-      console.log('\n📊 Import Summary:');
-      console.log(`✅ Successfully imported: ${successCount} products`);
-      console.log(`❌ Failed imports: ${errorCount} products`);
-      console.log(`📝 Total processed: ${productsToImport.length} products`);
+      console.log(`\n✅ Import completed!`);
+      console.log(`📈 Success: ${successCount} products`);
+      console.log(`❌ Errors: ${errorCount} products`);
       
     } catch (error) {
-      console.error('💥 Import failed:', error.message);
-      process.exit(1);
-    }
-  }
-
-  async importProduct(productXml) {
-    // Parse the product from XML
-    const product = this.xmlParser.parseProduct(productXml);
-    
-    // Convert to Shopify format
-    const shopifyProduct = this.xmlParser.convertToShopifyProduct(product, true);
-    
-    // Check if product already exists by handle
-    const existingProduct = await this.findExistingProduct(shopifyProduct.handle);
-    
-    if (existingProduct) {
-      console.log(`🔄 Updating existing product: ${shopifyProduct.title}`);
-      await this.shopify.updateProduct(existingProduct.id, shopifyProduct);
-      this.importedProducts.set(product.code, existingProduct.id);
-    } else {
-      console.log(`🆕 Creating new product: ${shopifyProduct.title}`);
-      const result = await this.shopify.createProduct(shopifyProduct);
-      this.importedProducts.set(product.code, result.product.id);
+      console.error('❌ Import failed:', error.message);
+      throw error;
     }
   }
 
   async findExistingProduct(handle) {
     try {
-      const response = await this.shopify.getProductByHandle(handle);
+      const response = await this.shopifyAPI.makeRequest('GET', `/products.json?handle=${handle}`);
       return response.products && response.products.length > 0 ? response.products[0] : null;
     } catch (error) {
-      // Product not found, which is expected for new products
+      console.warn(`⚠️ Could not check for existing product ${handle}:`, error.message);
       return null;
     }
   }
 
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  async createProduct(productData) {
+    try {
+      // Create the product first
+      const productResponse = await this.shopifyAPI.makeRequest('POST', '/products.json', {
+        product: {
+          title: productData.title,
+          vendor: productData.vendor,
+          body_html: productData.body_html,
+          handle: productData.handle,
+          product_type: productData.product_type,
+          category_id: productData.category_id, // Add category ID if available
+          tags: productData.tags,
+          status: productData.status,
+          options: productData.options,
+          variants: productData.variants,
+          images: productData.images
+        }
+      });
+
+      const createdProduct = productResponse.product;
+      console.log(`✅ Product created: ${createdProduct.title} (ID: ${createdProduct.id})`);
+
+      // Create metafields for the product
+      if (productData.metafields && productData.metafields.length > 0) {
+        await this.createProductMetafields(createdProduct.id, productData.metafields);
+      }
+
+      // Assign images to variants based on color
+      await this.assignVariantImages(createdProduct.id, productData.variants, createdProduct.images);
+
+      // Skip variant metafields to avoid repetition - they're not essential for the import
+      // if (productData.variants && productData.variants.length > 0) {
+      //   for (let i = 0; i < productData.variants.length; i++) {
+      //     const variant = productData.variants[i];
+      //     const createdVariant = createdProduct.variants[i];
+      //     
+      //     if (variant.metafields && variant.metafields.length > 0) {
+      //       await this.createVariantMetafields(createdProduct.id, createdVariant.id, variant.metafields);
+      //     }
+      //   }
+      // }
+
+      return createdProduct;
+    } catch (error) {
+      console.error('❌ Error creating product:', error.message);
+      throw error;
+    }
   }
 
-  // Get imported product IDs for translation import
-  getImportedProductIds() {
-    return this.importedProducts;
+  async updateProduct(productId, productData) {
+    try {
+      // Update the product
+      const productResponse = await this.shopifyAPI.makeRequest('PUT', `/products/${productId}.json`, {
+        product: {
+          id: productId,
+          title: productData.title,
+          vendor: productData.vendor,
+          body_html: productData.body_html,
+          product_type: productData.product_type,
+          category_id: productData.category_id, // Add category ID if available
+          tags: productData.tags,
+          status: productData.status,
+          options: productData.options,
+          variants: productData.variants,
+          images: productData.images
+        }
+      });
+
+      const updatedProduct = productResponse.product;
+      console.log(`✅ Product updated: ${updatedProduct.title} (ID: ${updatedProduct.id})`);
+
+      // Update metafields for the product
+      if (productData.metafields && productData.metafields.length > 0) {
+        await this.updateProductMetafields(productId, productData.metafields);
+      }
+
+      return updatedProduct;
+    } catch (error) {
+      console.error('❌ Error updating product:', error.message);
+      throw error;
+    }
+  }
+
+  async createProductMetafields(productId, metafields) {
+    for (const metafield of metafields) {
+      try {
+        await this.shopifyAPI.makeRequest('POST', `/products/${productId}/metafields.json`, {
+          metafield: {
+            namespace: metafield.namespace,
+            key: metafield.key,
+            value: metafield.value,
+            type: metafield.type
+          }
+        });
+        console.log(`  ✅ Created metafield: ${metafield.namespace}.${metafield.key}`);
+        
+        // Rate limiting: wait 500ms between metafield calls
+        await this.sleep(500);
+      } catch (error) {
+        if (error.response?.status === 429) {
+          console.warn(`  ⚠️ Rate limited, waiting 2 seconds before retry...`);
+          await this.sleep(2000);
+          // Retry once
+          try {
+            await this.shopifyAPI.makeRequest('POST', `/products/${productId}/metafields.json`, {
+              metafield: {
+                namespace: metafield.namespace,
+                key: metafield.key,
+                value: metafield.value,
+                type: metafield.type
+              }
+            });
+            console.log(`  ✅ Created metafield (retry): ${metafield.namespace}.${metafield.key}`);
+          } catch (retryError) {
+            console.warn(`  ⚠️ Could not create metafield ${metafield.namespace}.${metafield.key}:`, retryError.message);
+          }
+        } else {
+          console.warn(`  ⚠️ Could not create metafield ${metafield.namespace}.${metafield.key}:`, error.message);
+        }
+      }
+    }
+  }
+
+  async createVariantMetafields(productId, variantId, metafields) {
+    for (const metafield of metafields) {
+      try {
+        await this.shopifyAPI.makeRequest('POST', `/products/${productId}/variants/${variantId}/metafields.json`, {
+          metafield: {
+            namespace: metafield.namespace,
+            key: metafield.key,
+            value: metafield.value,
+            type: metafield.type
+          }
+        });
+        console.log(`  ✅ Created variant metafield: ${metafield.namespace}.${metafield.key}`);
+        
+        // Rate limiting: wait 500ms between metafield calls
+        await this.sleep(500);
+      } catch (error) {
+        if (error.response?.status === 429) {
+          console.warn(`  ⚠️ Rate limited, waiting 2 seconds before retry...`);
+          await this.sleep(2000);
+          // Retry once
+          try {
+            await this.shopifyAPI.makeRequest('POST', `/products/${productId}/variants/${variantId}/metafields.json`, {
+              metafield: {
+                namespace: metafield.namespace,
+                key: metafield.key,
+                value: metafield.value,
+                type: metafield.type
+              }
+            });
+            console.log(`  ✅ Created variant metafield (retry): ${metafield.namespace}.${metafield.key}`);
+          } catch (retryError) {
+            console.warn(`  ⚠️ Could not create variant metafield ${metafield.namespace}.${metafield.key}:`, retryError.message);
+          }
+        } else {
+          console.warn(`  ⚠️ Could not create variant metafield ${metafield.namespace}.${metafield.key}:`, error.message);
+        }
+      }
+    }
+  }
+
+  async updateProductMetafields(productId, metafields) {
+    for (const metafield of metafields) {
+      try {
+        // First try to update existing metafield
+        const existingMetafields = await this.shopifyAPI.makeRequest('GET', `/products/${productId}/metafields.json`);
+        const existingMetafield = existingMetafields.metafields.find(
+          m => m.namespace === metafield.namespace && m.key === metafield.key
+        );
+
+        if (existingMetafield) {
+          await this.shopifyAPI.makeRequest('PUT', `/products/${productId}/metafields/${existingMetafield.id}.json`, {
+            metafield: {
+              value: metafield.value
+            }
+          });
+          console.log(`  ✅ Updated metafield: ${metafield.namespace}.${metafield.key}`);
+        } else {
+          // Create new metafield if it doesn't exist
+          await this.createProductMetafields(productId, [metafield]);
+        }
+      } catch (error) {
+        console.warn(`  ⚠️ Could not update metafield ${metafield.namespace}.${metafield.key}:`, error.message);
+      }
+    }
+  }
+
+  async assignVariantImages(productId, originalVariants, createdImages) {
+    try {
+      // Create a map of color names to image IDs
+      const colorImageMap = {};
+      createdImages.forEach(image => {
+        const colorName = image.alt;
+        if (colorName) {
+          colorImageMap[colorName] = image.id;
+        }
+      });
+
+      // Get the current product to access variants
+      const productResponse = await this.shopifyAPI.makeRequest('GET', `/products/${productId}.json`);
+      const product = productResponse.product;
+
+      // Update variants with their corresponding images
+      const updatedVariants = product.variants.map(variant => {
+        const variantColor = variant.option1; // Color is option1
+        const matchingImageId = colorImageMap[variantColor];
+        
+        if (matchingImageId) {
+          return {
+            id: variant.id,
+            image_id: matchingImageId
+          };
+        }
+        return null;
+      }).filter(Boolean);
+
+      // Update variants with image assignments
+      for (const variant of updatedVariants) {
+        try {
+          await this.shopifyAPI.makeRequest('PUT', `/products/${productId}/variants/${variant.id}.json`, {
+            variant: {
+              id: variant.id,
+              image_id: variant.image_id
+            }
+          });
+          console.log(`  ✅ Assigned image to variant: ${variant.id}`);
+          
+          // Rate limiting: wait 500ms between variant updates
+          await this.sleep(500);
+        } catch (error) {
+          console.warn(`  ⚠️ Could not assign image to variant ${variant.id}:`, error.message);
+        }
+      }
+    } catch (error) {
+      console.warn(`  ⚠️ Could not assign variant images:`, error.message);
+    }
+  }
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
+
+module.exports = ProductImporter; 
 
 // Run the import if this file is executed directly
 if (require.main === module) {
   const importer = new ProductImporter();
-  importer.importProducts()
+  importer.importProducts(options)
     .then(() => {
-      console.log('🎉 Product import completed!');
-      process.exit(0);
+      console.log('✅ Import completed successfully!');
     })
     .catch((error) => {
-      console.error('💥 Product import failed:', error);
+      console.error('❌ Import failed:', error.message);
       process.exit(1);
     });
-}
-
-module.exports = ProductImporter; 
+} 

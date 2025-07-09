@@ -1,0 +1,49 @@
+All Available Categories (categories.category.0.name):
+==================================================
+01. Accessories
+02. Bags
+03. Bathroom accessories
+04. Design
+05. Fleeces
+06. Gift boxes
+07. Headwear and accessories
+08. Jackets
+09. Kids
+10. Kitchen accessories
+11. Knitwear
+12. Polos
+13. Shirts
+14. Shopping Bags
+15. Sweaters
+16. T-shirts
+17. Trousers and jog pants
+18. skyprotextiles.com (English)
+
+Category Distribution:
+Bags                :  73 products (8.9%)
+Headwear and accessories:  59 products (7.2%)
+Jackets             :  45 products (5.5%)
+T-shirts            :  43 products (5.3%)
+Sweaters            :  30 products (3.7%)
+Design              :  21 products (2.6%)
+Polos               :  17 products (2.1%)
+Shirts              :  13 products (1.6%)
+Fleeces             :  12 products (1.5%)
+skyprotextiles.com (English):  11 products (1.3%)
+Trousers and jog pants:  11 products (1.3%)
+Kitchen accessories :   7 products (0.9%)
+Kids                :   4 products (0.5%)
+Bathroom accessories:   2 products (0.2%)
+Accessories         :   2 products (0.2%)
+Gift boxes          :   2 products (0.2%)
+Shopping Bags       :   1 products (0.1%)
+Knitwear            :   1 products (0.1%)
+
+Selected Categories for Import:
+- Bags
+- Headwear and accessories
+- Shopping Bags
+- Sweaters
+- T-shirts
+- Trousers and jog pants
+- Polos 

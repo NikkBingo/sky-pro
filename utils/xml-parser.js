@@ -1,5 +1,6 @@
 const axios = require('axios');
 const xml2js = require('xml2js');
+const { createMetafields, createVariantOptions, createVariants } = require('../config/field-mapping');
 
 class XMLParser {
   constructor() {
@@ -34,6 +35,8 @@ class XMLParser {
       images: this.parseImages(productXml.images),
       variants: this.parseVariants(productXml.variants),
       documents: this.parseDocuments(productXml.documents),
+      // Add raw XML data for field mapping
+      raw: productXml
     };
 
     return product;
@@ -143,40 +146,10 @@ class XMLParser {
       .replace(/-+/g, '-')
       .trim();
 
-    // Convert variants to Shopify format
-    const variants = product.variants.map(variant => ({
-      option1: variant.colorName || variant.color, // Color
-      option2: variant.size || null, // Size
-      option3: null, // Additional option if needed
-      price: variant.price.toString(),
-      sku: variant.code,
-      inventory_quantity: variant.freeStock,
-      inventory_management: 'shopify',
-      inventory_policy: 'deny',
-      weight: 0.5, // Default weight, adjust as needed
-      weight_unit: 'kg',
-      requires_shipping: true,
-      taxable: true,
-    }));
-
-    // Get unique options
-    const colors = [...new Set(product.variants.map(v => v.colorName || v.color))];
-    const sizes = [...new Set(product.variants.map(v => v.size).filter(Boolean))];
-
-    // Create options array
-    const options = [];
-    if (colors.length > 0) {
-      options.push({
-        name: 'Color',
-        values: colors,
-      });
-    }
-    if (sizes.length > 0) {
-      options.push({
-        name: 'Size',
-        values: sizes,
-      });
-    }
+    // Use the new field mapping to create variants and options
+    const variants = createVariants(product.raw);
+    const options = createVariantOptions(product.raw);
+    const metafields = createMetafields(product.raw);
 
     // Process images
     const images = product.images.map(img => ({
@@ -203,7 +176,7 @@ class XMLParser {
       variants: variants,
       options: options,
       images: images,
-      metafields: this.createMetafields(product),
+      metafields: metafields,
     };
   }
 
@@ -215,42 +188,6 @@ class XMLParser {
       .replace(/\n/g, '<br>')
       .replace(/\•/g, '•')
       .replace(/\*/g, '•');
-  }
-
-  createMetafields(product) {
-    const metafields = [];
-
-    // Product code
-    if (product.code) {
-      metafields.push({
-        namespace: 'custom',
-        key: 'product_code',
-        value: product.code,
-        type: 'single_line_text_field',
-      });
-    }
-
-    // Size table
-    if (product.sizeTable) {
-      metafields.push({
-        namespace: 'custom',
-        key: 'size_table',
-        value: product.sizeTable,
-        type: 'multi_line_text_field',
-      });
-    }
-
-    // Package info
-    if (product.package) {
-      metafields.push({
-        namespace: 'custom',
-        key: 'package_size',
-        value: product.package.toString(),
-        type: 'single_line_text_field',
-      });
-    }
-
-    return metafields;
   }
 }
 
