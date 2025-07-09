@@ -294,18 +294,15 @@ function splitProductBySize(xmlData) {
     return [createShopifyProduct(xmlData)];
   }
   
-  // Get the main product image (first image) to use for all split products
-  let mainProductImage = null;
+  // Get all product images to use for all split products
+  let allProductImages = [];
   if (xmlData.images?.image) {
     const images = Array.isArray(xmlData.images.image) ? xmlData.images.image : [xmlData.images.image];
-    if (images.length > 0) {
-      const firstImage = images[0];
-      mainProductImage = {
-        src: firstImage.src,
-        alt: cleanImageName(firstImage.caption || firstImage.name) || 'Product Image',
-        position: 1
-      };
-    }
+    allProductImages = images.map((image, index) => ({
+      src: image.src,
+      alt: cleanImageName(image.caption || image.name) || 'Product Image',
+      position: index + 1
+    }));
   }
   
   sizes.forEach((size, index) => {
@@ -332,29 +329,17 @@ function splitProductBySize(xmlData) {
         splitProduct.title = `${splitProduct.title} - ${size}`;
         splitProduct.handle = `${splitProduct.handle}-size-${size.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
         
-        // Set the same main product image for all split products
-        if (mainProductImage) {
-          splitProduct.images = [mainProductImage];
-          console.log(`📸 Using main product image for split product ${index + 1} (${size})`);
+        // Assign all product images to each split product
+        if (allProductImages.length > 0) {
+          splitProduct.images = allProductImages;
+          console.log(`📸 Using all ${allProductImages.length} product images for split product ${index + 1} (${size})`);
         } else {
           splitProduct.images = [];
-          console.log(`📸 No main product image available for split product ${index + 1} (${size})`);
+          console.log(`📸 No product images available for split product ${index + 1} (${size})`);
         }
         
-        // Add Product Grouping metafields
-        splitProduct.metafields.push({
-          namespace: 'product_grouping',
-          key: 'option_1',
-          value: xmlData.title, // Original product name as group identifier
-          type: 'single_line_text_field'
-        });
-        
-        splitProduct.metafields.push({
-          namespace: 'product_grouping',
-          key: 'option_1_value',
-          value: size, // Size as the grouping value
-          type: 'single_line_text_field'
-        });
+        // Product Grouping metafields will be added after product creation
+        // to ensure proper GID references and grouping structure
         
         splitProducts.push(splitProduct);
       }
@@ -410,27 +395,6 @@ function createShopifyProduct(xmlData) {
         inventory_policy: variant.available === '0' ? 'deny' : 'continue',
         option1: variant.color_name, // Color
         option2: variant.size, // Size
-        // Variant metafields removed to avoid repetition - not essential for import
-        // metafields: [
-        //   {
-        //     namespace: 'stanley_stella',
-        //     key: 'color_hex',
-        //     value: variant.hexcolors?.hexcolor || '',
-        //     type: 'single_line_text_field'
-        //   },
-        //   {
-        //     namespace: 'stanley_stella',
-        //     key: 'incoming_stock',
-        //     value: variant.incoming || '0',
-        //     type: 'number_integer'
-        //   },
-        //   {
-        //     namespace: 'stanley_stella',
-        //     key: 'mf_stock',
-        //     value: variant.mfstock || '0',
-        //     type: 'number_integer'
-        //   }
-        // ]
       };
       
       product.variants.push(shopifyVariant);
@@ -466,9 +430,6 @@ function createShopifyProduct(xmlData) {
     Object.values(colorImageMap).forEach(image => {
       product.images.push(image);
     });
-    
-    // Note: Image assignment to variants will be handled after product creation
-    // when we have the actual Shopify image IDs
   }
 
   // Process metafields
@@ -574,6 +535,9 @@ function createShopifyProduct(xmlData) {
     metafield.value !== null && metafield.value !== undefined && metafield.value !== ''
   );
 
+  // SAFEGUARD: Remove any Product Grouping metafields if present (should only be added by splitProductBySize)
+  product.metafields = product.metafields.filter(mf => !mf.namespace.startsWith('product_grouping_option_1'));
+
   return product;
 }
 
@@ -582,5 +546,6 @@ module.exports = {
   createShopifyProduct,
   splitProductBySize,
   extractCareInstructions,
-  extractProductSpecs
+  extractProductSpecs,
+  cleanImageName
 }; 

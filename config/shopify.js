@@ -105,6 +105,30 @@ class ShopifyAPI {
   async getShopInfo() {
     return this.makeRequest('GET', '/shop.json');
   }
+
+  // GraphQL method for metaobject operations
+  async makeGraphQLRequest(query, variables = {}) {
+    try {
+      const config = {
+        method: 'POST',
+        url: `https://${this.shopUrl}/admin/api/graphql.json`,
+        headers: {
+          'X-Shopify-Access-Token': this.accessToken,
+          'Content-Type': 'application/json'
+        },
+        data: {
+          query,
+          variables
+        }
+      };
+
+      const response = await axios(config);
+      return response.data;
+    } catch (error) {
+      console.error(`Shopify GraphQL Error:`, error.response?.status, error.response?.data?.errors || error.message);
+      throw error;
+    }
+  }
 }
 
 module.exports = ShopifyAPI; 
