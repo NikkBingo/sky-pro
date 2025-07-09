@@ -224,6 +224,25 @@ function capitalizeText(text) {
     .join(' ');
 }
 
+// Function to clean image names and remove UUIDs
+function cleanImageName(name) {
+  if (!name) return '';
+  
+  // Remove UUID patterns (8-4-4-4-12 format)
+  let cleaned = name.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '');
+  
+  // Remove other UUID-like patterns
+  cleaned = cleaned.replace(/[0-9a-f]{32}/gi, '');
+  
+  // Remove extra spaces and dashes
+  cleaned = cleaned.replace(/\s+/g, ' ').replace(/-+/g, '-').trim();
+  
+  // Remove leading/trailing dashes
+  cleaned = cleaned.replace(/^-+|-+$/g, '');
+  
+  return cleaned || 'Product Image';
+}
+
 // Function to split products with over 100 variants by size
 function splitProductBySize(xmlData) {
   const variants = xmlData.variants?.variant ? 
@@ -416,7 +435,7 @@ function createShopifyProduct(xmlData) {
     // Create a map of color names to images
     const colorImageMap = {};
     images.forEach((image, index) => {
-      const colorName = image.caption || image.name;
+      const colorName = cleanImageName(image.caption || image.name);
       if (colorName) {
         colorImageMap[colorName] = {
           src: image.src,
