@@ -1260,10 +1260,10 @@ class ProductImporter {
       
       console.log(`📋 Available colors in product images: ${Object.keys(colorImageMap).join(', ')}`);
       
-      // Update variants with their corresponding images
-      const variantsToUpdate = [];
+      // Update variants with their corresponding images using GraphQL methods
+      let assignedCount = 0;
       
-      product.variants.forEach(variant => {
+      for (const variant of product.variants) {
         // Try to match variant by color option (option1 is typically color)
         const variantColor = variant.option1;
         const matchingImageId = colorImageMap[variantColor];
@@ -1271,37 +1271,171 @@ class ProductImporter {
         console.log(`  🔍 Variant ${variant.id} (${variantColor}) -> image: ${matchingImageId || 'NOT FOUND'}`);
         
         if (matchingImageId) {
-          variantsToUpdate.push({
-            id: variant.id,
-            image_id: matchingImageId,
-            color: variantColor
-          });
-        }
-      });
-      
-      console.log(`📸 Found ${variantsToUpdate.length} variants to assign images to`);
-      
-      // Update variants with image assignments
-      for (const variant of variantsToUpdate) {
-        try {
-          await this.shopifyAPI.makeRequest('PUT', `/products/${productId}/variants/${variant.id}.json`, {
-            variant: {
-              id: variant.id,
-              image_id: variant.image_id
-            }
-          });
-          console.log(`  ✅ Assigned image ${variant.image_id} to variant ${variant.id} (${variant.color})`);
+          const assignmentResult = await this.assignImageToVariant(productId, variant.id, matchingImageId);
+          if (assignmentResult.success) {
+            assignedCount++;
+            console.log(`  ✅ Successfully assigned image to variant ${variant.id} (${variantColor})`);
+          } else {
+            console.log(`  ⚠️ Failed to assign image to variant ${variant.id} (${variantColor})`);
+          }
           
-          // Rate limiting: wait 500ms between variant updates
+          // Rate limiting: wait 500ms between variant assignments
           await this.sleep(500);
-        } catch (error) {
-          console.warn(`  ⚠️ Could not assign image to variant ${variant.id}:`, error.message);
         }
       }
       
-      console.log(`🎯 Variant image assignment completed for product ${productId}`);
+      console.log(`🎯 Variant image assignment completed for product ${productId}: ${assignedCount} variants assigned`);
     } catch (error) {
       console.warn(`  ⚠️ Could not assign variant images:`, error.message);
+    }
+  }
+
+  async assignImageToVariant(productId, variantId, mediaId) {
+    try {
+      console.log(`🔗 Attempting to assign image to variant via GraphQL`);
+      console.log(`🔗 Product: ${productId}`);
+      console.log(`🔗 Variant: ${variantId}`);
+      console.log(`🔗 Media: ${mediaId}`);
+      
+      // Try Method 1: productVariantAppendMedia (the correct approach)
+      console.log(`🔄 Method 1: Trying productVariantAppendMedia...`);
+      
+      try {
+        const appendMediaResponse = await this.shopifyAPI.makeGraphQLRequest(
+          `mutation productVariantAppendMedia($productId: ID!, $variantMedia: [ProductVariantAppendMediaInput!]!) {
+            productVariantAppendMedia(productId: $productId, variantMedia: $variantMedia) {
+              productVariants {
+                id
+                image {
+                  id
+                  url
+                }
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }`,
+          {
+            productId: productId,
+            variantMedia: [{
+              variantId: variantId,
+              mediaIds: [mediaId]
+            }]
+          }
+        );
+
+        if (appendMediaResponse.errors) {
+          console.log(`⚠️ Method 1 GraphQL errors:`, appendMediaResponse.errors);
+        } else if (appendMediaResponse.data?.productVariantAppendMedia?.userErrors?.length > 0) {
+          console.log(`⚠️ Method 1 user errors:`, appendMediaResponse.data.productVariantAppendMedia.userErrors);
+        } else if (appendMediaResponse.data?.productVariantAppendMedia?.productVariants?.length > 0) {
+          const updatedVariant = appendMediaResponse.data.productVariantAppendMedia.productVariants[0];
+          if (updatedVariant.image?.id) {
+            console.log(`✅ Method 1 SUCCESS: Variant image assigned via productVariantAppendMedia`);
+            console.log(`   Updated variant image: ${updatedVariant.image.id}`);
+            return { success: true, method: 'productVariantAppendMedia', imageId: updatedVariant.image.id };
+          }
+        }
+      } catch (appendError) {
+        console.log(`⚠️ Method 1 failed:`, appendError.message);
+      }
+
+      // Try Method 2: productVariantsBulkUpdate with media parameter
+      console.log(`🔄 Method 2: Trying productVariantsBulkUpdate with media...`);
+      
+      try {
+        const bulkUpdateResponse = await this.shopifyAPI.makeGraphQLRequest(
+          `mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+            productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+              productVariants {
+                id
+                image {
+                  id
+                  url
+                }
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }`,
+          {
+            productId: productId,
+            variants: [{
+              id: variantId,
+              imageId: mediaId // Use the media ID directly
+            }]
+          }
+        );
+
+        if (bulkUpdateResponse.errors) {
+          console.log(`⚠️ Method 2 GraphQL errors:`, bulkUpdateResponse.errors);
+        } else if (bulkUpdateResponse.data?.productVariantsBulkUpdate?.userErrors?.length > 0) {
+          console.log(`⚠️ Method 2 user errors:`, bulkUpdateResponse.data.productVariantsBulkUpdate.userErrors);
+        } else if (bulkUpdateResponse.data?.productVariantsBulkUpdate?.productVariants?.length > 0) {
+          const updatedVariant = bulkUpdateResponse.data.productVariantsBulkUpdate.productVariants[0];
+          if (updatedVariant.image?.id) {
+            console.log(`✅ Method 2 SUCCESS: Variant image assigned via productVariantsBulkUpdate`);
+            console.log(`   Updated variant image: ${updatedVariant.image.id}`);
+            return { success: true, method: 'productVariantsBulkUpdate', imageId: updatedVariant.image.id };
+          }
+        }
+      } catch (bulkError) {
+        console.log(`⚠️ Method 2 failed:`, bulkError.message);
+      }
+
+      // Try Method 3: productVariantUpdate (single variant update)
+      console.log(`🔄 Method 3: Trying productVariantUpdate...`);
+      
+      try {
+        const variantUpdateResponse = await this.shopifyAPI.makeGraphQLRequest(
+          `mutation productVariantUpdate($input: ProductVariantInput!) {
+            productVariantUpdate(input: $input) {
+              productVariant {
+                id
+                image {
+                  id
+                  url
+                }
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }`,
+          {
+            input: {
+              id: variantId,
+              imageId: mediaId
+            }
+          }
+        );
+
+        if (variantUpdateResponse.errors) {
+          console.log(`⚠️ Method 3 GraphQL errors:`, variantUpdateResponse.errors);
+        } else if (variantUpdateResponse.data?.productVariantUpdate?.userErrors?.length > 0) {
+          console.log(`⚠️ Method 3 user errors:`, variantUpdateResponse.data.productVariantUpdate.userErrors);
+        } else if (variantUpdateResponse.data?.productVariantUpdate?.productVariant?.image?.id) {
+          const updatedVariant = variantUpdateResponse.data.productVariantUpdate.productVariant;
+          console.log(`✅ Method 3 SUCCESS: Variant image assigned via productVariantUpdate`);
+          console.log(`   Updated variant image: ${updatedVariant.image.id}`);
+          return { success: true, method: 'productVariantUpdate', imageId: updatedVariant.image.id };
+        }
+      } catch (variantError) {
+        console.log(`⚠️ Method 3 failed:`, variantError.message);
+      }
+
+      // If all GraphQL methods fail
+      console.log(`⚠️ All GraphQL methods failed for variant ${variantId}`);
+      
+      return { success: false, method: 'all_methods_failed', error: 'No GraphQL method succeeded' };
+    } catch (error) {
+      console.error(`❌ Error in assignImageToVariant:`, error);
+      return { success: false, method: 'exception', error: error.message };
     }
   }
 
