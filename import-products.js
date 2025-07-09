@@ -99,7 +99,7 @@ class ProductImporter {
         
         // Rate limiting - pause between requests
         if (!dryRun && i < Math.min(limit, productArray.length) - 1) {
-          await this.sleep(2000); // 2 second pause to prevent rate limiting
+          await this.sleep(3000); // 3 second pause to prevent rate limiting
         }
       }
       
@@ -116,6 +116,8 @@ class ProductImporter {
   async findExistingProduct(handle) {
     try {
       const response = await this.shopifyAPI.makeRequest('GET', `/products.json?handle=${handle}`);
+      // Rate limiting between API calls
+      await this.sleep(500);
       return response.products && response.products.length > 0 ? response.products[0] : null;
     } catch (error) {
       console.warn(`⚠️ Could not check for existing product ${handle}:`, error.message);
@@ -148,10 +150,14 @@ class ProductImporter {
       // Create metafields for the product
       if (productData.metafields && productData.metafields.length > 0) {
         await this.createProductMetafields(createdProduct.id, productData.metafields);
+        // Rate limiting between API calls
+        await this.sleep(500);
       }
 
       // Assign images to variants based on color
       await this.assignVariantImages(createdProduct.id, productData.variants, createdProduct.images);
+      // Rate limiting between API calls
+      await this.sleep(500);
 
       // Skip variant metafields to avoid repetition - they're not essential for the import
       // if (productData.variants && productData.variants.length > 0) {
@@ -197,6 +203,8 @@ class ProductImporter {
       // Update metafields for the product
       if (productData.metafields && productData.metafields.length > 0) {
         await this.updateProductMetafields(productId, productData.metafields);
+        // Rate limiting between API calls
+        await this.sleep(500);
       }
 
       return updatedProduct;

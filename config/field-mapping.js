@@ -299,6 +299,12 @@ function splitProductBySize(xmlData) {
         splitProduct.title = `${splitProduct.title} - ${size}`;
         splitProduct.handle = `${splitProduct.handle}-size-${size.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
         
+        // Only include images in the first split product to avoid duplication
+        if (index > 0) {
+          splitProduct.images = [];
+          console.log(`📸 Skipping images for split product ${index + 1} (${size}) - images will be reused from first product`);
+        }
+        
         // Add Product Grouping metafields
         splitProduct.metafields.push({
           namespace: 'product_grouping',
