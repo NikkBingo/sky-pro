@@ -461,7 +461,7 @@ class ProductImporter {
               // Assign variant images to first split product after images are uploaded
               if (updatedFirstProduct.images && updatedFirstProduct.images.length > 0) {
                 console.log(`📸 Assigning variant images to first split product ${firstProduct.title}`);
-                await this.assignVariantImages(firstProduct.id, firstProductData.variants, updatedFirstProduct.images);
+                await this.assignVariantImages(firstProduct.id, firstProductData.variants);
                 await this.sleep(1000);
               }
               
@@ -487,7 +487,7 @@ class ProductImporter {
                 // Assign variant images after all images are uploaded
                 if (updatedProduct.images && updatedProduct.images.length > 0) {
                   console.log(`📸 Assigning variant images to split product ${product.title}`);
-                  await this.assignVariantImages(product.id, productData.variants, updatedProduct.images);
+                  await this.assignVariantImages(product.id, productData.variants);
                   await this.sleep(1000);
                 }
                 
@@ -997,7 +997,7 @@ class ProductImporter {
         // Assign variant images after all images are uploaded
         if (updatedProduct.images && updatedProduct.images.length > 0) {
           console.log(`📸 Assigning variant images to product ${createdProduct.title}`);
-          await this.assignVariantImages(createdProduct.id, productData.variants, updatedProduct.images);
+          await this.assignVariantImages(createdProduct.id, productData.variants);
           await this.sleep(1000);
         }
       }
@@ -1072,7 +1072,7 @@ class ProductImporter {
         // Assign variant images after all images are uploaded
         if (updatedProductWithImages.images && updatedProductWithImages.images.length > 0) {
           console.log(`📸 Assigning variant images to updated product ${updatedProduct.title}`);
-          await this.assignVariantImages(productId, productData.variants, updatedProductWithImages.images);
+          await this.assignVariantImages(productId, productData.variants);
           await this.sleep(1000);
         }
       }
@@ -1220,17 +1220,12 @@ class ProductImporter {
     }
   }
 
-  async assignVariantImages(productId, originalVariants, createdImages) {
+  async assignVariantImages(productId, originalVariants) {
     try {
       console.log(`📸 Starting variant image assignment for product ${productId}`);
-      console.log(`📊 Found ${createdImages?.length || 0} images and ${originalVariants?.length || 0} variants`);
+      console.log(`📊 Found ${originalVariants?.length || 0} variants`);
       
-      if (!createdImages || createdImages.length === 0) {
-        console.log(`⚠️ No images available for variant assignment`);
-        return;
-      }
-      
-      // Get the current product to access variants
+      // Get the current product to access variants and actual uploaded images
       const productResponse = await this.shopifyAPI.makeRequest('GET', `/products/${productId}.json`);
       const product = productResponse.product;
       
@@ -1239,11 +1234,20 @@ class ProductImporter {
         return;
       }
       
-      // Create a map of color names to image IDs
+      // Get the actual uploaded images from the product
+      const actualImages = product.images || [];
+      console.log(`📸 Found ${actualImages.length} uploaded images in product`);
+      
+      if (actualImages.length === 0) {
+        console.log(`⚠️ No uploaded images found in product ${productId}`);
+        return;
+      }
+      
+      // Create a map of color names to image IDs from the actual uploaded images
       const colorImageMap = {};
       
       // Map images by their alt text (color name)
-      createdImages.forEach(image => {
+      actualImages.forEach(image => {
         if (image.alt) {
           const colorName = image.alt.trim();
           colorImageMap[colorName] = image.id;
