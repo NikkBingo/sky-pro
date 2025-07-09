@@ -112,18 +112,18 @@ class ProductImporter {
   async uploadImageWithShopifyFileSystem(productId, imageData, styleName) {
     try {
       const imageUrl = imageData.src;
-      const baseAlt = styleName; // Use the style name as alt text
+      const baseAlt = imageData.alt || styleName; // Use the color name from imageData.alt, fallback to styleName
       
       // Get original filename from image data or generate one
       let originalFilename = '';
       if (imageData.filename) {
         originalFilename = imageData.filename;
       } else {
-        // Fallback: generate filename from style name
+        // Fallback: generate filename from color name
         originalFilename = `${this.generateImageIdentifier(baseAlt)}.jpg`;
       }
       
-      console.log(`📸 Processing image for ${styleName}: ${this.truncateForLog(imageUrl)}`);
+      console.log(`📸 Processing image for ${baseAlt}: ${this.truncateForLog(imageUrl)}`);
       console.log(`📸 Original filename: ${originalFilename}`);
       
       let mediaId = null;
@@ -250,7 +250,7 @@ class ProductImporter {
         
         if (!existingNode) {
           // Upload fresh image (first time we see this style or reuse failed) with custom filename
-          console.log(`📤 Uploading new image for StyleName: '${baseAlt}'`);
+          console.log(`📤 Uploading new image for Color: '${baseAlt}'`);
           
           try {
             // First create the file with custom filename (from app.import-products.jsx)
@@ -265,7 +265,7 @@ class ProductImporter {
                 files: [
                   {
                     originalSource: imageUrl,
-                    alt: baseAlt, // Use StyleName as alt text
+                    alt: baseAlt, // Use color name as alt text
                     filename: originalFilename, // Use original filename
                     contentType: "IMAGE",
                   },
