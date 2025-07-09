@@ -466,7 +466,7 @@ class ProductImporter {
                 if (updatedFirstProduct.images && updatedFirstProduct.images.length > 0) {
                   console.log(`📸 Assigning variant images to first split product ${firstProduct.title}`);
                   await this.assignVariantImages(firstProduct.id, firstProductData.variants, updatedFirstProduct.images);
-                  await this.sleep(500);
+                  await this.sleep(1000);
                 }
                 
                 // Step 2: Reference images to all other split products (reuse the same images)
@@ -488,7 +488,7 @@ class ProductImporter {
                   if (updatedProduct.images && updatedProduct.images.length > 0) {
                     console.log(`📸 Assigning variant images to split product ${product.title}`);
                     await this.assignVariantImages(product.id, productData.variants, updatedProduct.images);
-                    await this.sleep(500);
+                    await this.sleep(1000);
                   }
                   
                   // Add delay between split products
@@ -1017,7 +1017,7 @@ class ProductImporter {
           
           for (const imageData of batch) {
             await this.uploadImageWithShopifyFileSystem(createdProduct.id, imageData, productData.title);
-            await this.sleep(500); // Small delay between individual image uploads
+            await this.sleep(1000); // Small delay between individual image uploads
           }
           
           // Wait between batches
@@ -1035,7 +1035,7 @@ class ProductImporter {
         if (updatedProduct.images && updatedProduct.images.length > 0) {
           console.log(`📸 Assigning variant images to product ${createdProduct.title}`);
           await this.assignVariantImages(createdProduct.id, productData.variants, updatedProduct.images);
-          await this.sleep(500);
+          await this.sleep(1000);
         }
       }
 
@@ -1072,7 +1072,7 @@ class ProductImporter {
       if (productData.metafields && productData.metafields.length > 0) {
         await this.updateProductMetafields(productId, productData.metafields);
         // Rate limiting between API calls
-        await this.sleep(500);
+        await this.sleep(1000);
       }
 
       // Check if product already has images before uploading new ones
@@ -1092,7 +1092,7 @@ class ProductImporter {
           
           for (const imageData of batch) {
             await this.uploadImageWithShopifyFileSystem(productId, imageData, productData.title);
-            await this.sleep(500);
+            await this.sleep(1000);
           }
           
           // Wait between batches
@@ -1110,7 +1110,7 @@ class ProductImporter {
         if (updatedProductWithImages.images && updatedProductWithImages.images.length > 0) {
           console.log(`📸 Assigning variant images to updated product ${updatedProduct.title}`);
           await this.assignVariantImages(productId, productData.variants, updatedProductWithImages.images);
-          await this.sleep(500);
+          await this.sleep(1000);
         }
       }
 
@@ -1134,12 +1134,12 @@ class ProductImporter {
         });
         console.log(`  ✅ Created metafield: ${metafield.namespace}.${metafield.key}`);
         
-        // Rate limiting: wait 500ms between metafield calls
-        await this.sleep(500);
+        // Rate limiting: wait 1000ms between metafield calls (Shopify limit: 2 calls/second)
+        await this.sleep(1000);
       } catch (error) {
         if (error.response?.status === 429) {
-          console.warn(`  ⚠️ Rate limited, waiting 2 seconds before retry...`);
-          await this.sleep(2000);
+          console.warn(`  ⚠️ Rate limited, waiting 5 seconds before retry...`);
+          await this.sleep(5000);
           // Retry once
           try {
             await this.shopifyAPI.makeRequest('POST', `/products/${productId}/metafields.json`, {
@@ -1174,12 +1174,12 @@ class ProductImporter {
         });
         console.log(`  ✅ Created variant metafield: ${metafield.namespace}.${metafield.key}`);
         
-        // Rate limiting: wait 500ms between metafield calls
-        await this.sleep(500);
+        // Rate limiting: wait 1000ms between metafield calls (Shopify limit: 2 calls/second)
+        await this.sleep(1000);
       } catch (error) {
         if (error.response?.status === 429) {
-          console.warn(`  ⚠️ Rate limited, waiting 2 seconds before retry...`);
-          await this.sleep(2000);
+          console.warn(`  ⚠️ Rate limited, waiting 5 seconds before retry...`);
+          await this.sleep(5000);
           // Retry once
           try {
             await this.shopifyAPI.makeRequest('POST', `/products/${productId}/variants/${variantId}/metafields.json`, {
@@ -1221,8 +1221,38 @@ class ProductImporter {
           // Create new metafield if it doesn't exist
           await this.createProductMetafields(productId, [metafield]);
         }
+        
+        // Rate limiting: wait 1000ms between metafield calls (Shopify limit: 2 calls/second)
+        await this.sleep(1000);
       } catch (error) {
-        console.warn(`  ⚠️ Could not update metafield ${metafield.namespace}.${metafield.key}:`, error.message);
+        if (error.response?.status === 429) {
+          console.warn(`  ⚠️ Rate limited, waiting 5 seconds before retry...`);
+          await this.sleep(5000);
+          // Retry once
+          try {
+            if (existingMetafield) {
+              await this.shopifyAPI.makeRequest('PUT', `/products/${productId}/metafields/${existingMetafield.id}.json`, {
+                metafield: {
+                  value: metafield.value
+                }
+              });
+            } else {
+              await this.shopifyAPI.makeRequest('POST', `/products/${productId}/metafields.json`, {
+                metafield: {
+                  namespace: metafield.namespace,
+                  key: metafield.key,
+                  value: metafield.value,
+                  type: metafield.type
+                }
+              });
+            }
+            console.log(`  ✅ Updated metafield (retry): ${metafield.namespace}.${metafield.key}`);
+          } catch (retryError) {
+            console.warn(`  ⚠️ Could not update metafield ${metafield.namespace}.${metafield.key}:`, retryError.message);
+          }
+        } else {
+          console.warn(`  ⚠️ Could not update metafield ${metafield.namespace}.${metafield.key}:`, error.message);
+        }
       }
     }
   }
@@ -1279,8 +1309,8 @@ class ProductImporter {
             console.log(`  ⚠️ Failed to assign image to variant ${variant.id} (${variantColor})`);
           }
           
-          // Rate limiting: wait 500ms between variant assignments
-          await this.sleep(500);
+          // Rate limiting: wait 1000ms between variant assignments (Shopify limit: 2 calls/second)
+          await this.sleep(1000);
         }
       }
       
