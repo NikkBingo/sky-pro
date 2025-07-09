@@ -126,7 +126,7 @@ class ProductImporter {
                   
                   for (const imageData of batch) {
                     await this.uploadImageWithReuse(product.id, imageData, colorImageMap);
-                    await this.sleep(500); // Small delay between individual image uploads
+                    await this.sleep(200); // 200ms delay for split product image uploads
                   }
                   
                   // Wait between batches
@@ -146,6 +146,12 @@ class ProductImporter {
                   console.log(`📸 Assigning variant images to split product ${product.title}`);
                   await this.assignVariantImages(product.id, productData.variants, updatedProduct.images);
                   await this.sleep(500);
+                }
+                
+                // Add delay between split products
+                if (j < createdProducts.length - 1) {
+                  console.log(`⏳ Waiting 200ms between split products...`);
+                  await this.sleep(200);
                 }
               }
               

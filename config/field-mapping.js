@@ -224,6 +224,28 @@ function capitalizeText(text) {
     .join(' ');
 }
 
+// Function to clean product titles and remove UUIDs
+function cleanProductTitle(title) {
+  if (!title) return '';
+  
+  // Remove UUID patterns (8-4-4-4-12 format)
+  let cleaned = title.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '');
+  
+  // Remove other UUID-like patterns
+  cleaned = cleaned.replace(/[0-9a-f]{32}/gi, '');
+  
+  // Remove patterns like "76459_5da8ad25-8a1f-48fc-be4a-1a6b6c54ece4"
+  cleaned = cleaned.replace(/[0-9]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '');
+  
+  // Remove extra spaces and dashes
+  cleaned = cleaned.replace(/\s+/g, ' ').replace(/-+/g, '-').trim();
+  
+  // Remove leading/trailing dashes
+  cleaned = cleaned.replace(/^-+|-+$/g, '');
+  
+  return cleaned || 'Product';
+}
+
 // Function to clean image names and remove UUIDs
 function cleanImageName(name) {
   if (!name) return '';
@@ -241,6 +263,30 @@ function cleanImageName(name) {
   cleaned = cleaned.replace(/^-+|-+$/g, '');
   
   return cleaned || 'Product Image';
+}
+
+function cleanImageSrc(src) {
+  if (!src) return '';
+  
+  // Extract the filename from the URL
+  const urlParts = src.split('/');
+  const filename = urlParts[urlParts.length - 1];
+  
+  // Remove UUID patterns from filename (8-4-4-4-12 format)
+  let cleanedFilename = filename.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '');
+  
+  // Remove other UUID-like patterns
+  cleanedFilename = cleanedFilename.replace(/[0-9a-f]{32}/gi, '');
+  
+  // Remove underscore followed by UUID (like 76459_13358f99-e7b4-4e14-be77-ab7f8c3fbbbe)
+  cleanedFilename = cleanedFilename.replace(/_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '');
+  
+  // Remove extra dashes, underscores and clean up
+  cleanedFilename = cleanedFilename.replace(/[-_]+/g, '-').replace(/^-+|-+$/g, '');
+  
+  // Reconstruct the URL with cleaned filename
+  urlParts[urlParts.length - 1] = cleanedFilename;
+  return urlParts.join('/');
 }
 
 // Function to split products with over 100 variants by size
@@ -299,8 +345,8 @@ function splitProductBySize(xmlData) {
   if (xmlData.images?.image) {
     const images = Array.isArray(xmlData.images.image) ? xmlData.images.image : [xmlData.images.image];
     allProductImages = images.map((image, index) => ({
-      src: image.src,
-      alt: cleanImageName(image.caption || image.name) || 'Product Image',
+      src: cleanImageSrc(image.src), // Clean file name/URL (remove UUIDs)
+      alt: image.caption || image.name || 'Product Image', // Keep original alt text
       position: index + 1
     }));
   }
@@ -321,7 +367,7 @@ function splitProductBySize(xmlData) {
         originalTitle: xmlData.title
       };
       
-      const splitProduct = createShopifyProduct(splitXmlData);
+      const splitProduct = createShopifyProduct(splitXmlData, true); // Skip image processing for split products
       
       // Only add the split product if it has valid variants
       if (splitProduct.variants && splitProduct.variants.length > 0) {
@@ -329,10 +375,10 @@ function splitProductBySize(xmlData) {
         splitProduct.title = `${splitProduct.title} - ${size}`;
         splitProduct.handle = `${splitProduct.handle}-size-${size.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
         
-        // Assign all product images to each split product
+        // Override the images with the cleaned versions to prevent UUID duplication
         if (allProductImages.length > 0) {
           splitProduct.images = allProductImages;
-          console.log(`📸 Using all ${allProductImages.length} product images for split product ${index + 1} (${size})`);
+          console.log(`📸 Using all ${allProductImages.length} cleaned product images for split product ${index + 1} (${size})`);
         } else {
           splitProduct.images = [];
           console.log(`📸 No product images available for split product ${index + 1} (${size})`);
@@ -351,7 +397,7 @@ function splitProductBySize(xmlData) {
 }
 
 // Function to create Shopify product from XML data
-function createShopifyProduct(xmlData) {
+function createShopifyProduct(xmlData, skipImageProcessing = false) {
   // Determine product category using the category mapping system
   const productType = xmlData.categories?.category?.[0]?.name || 'Apparel';
   const categoryId = getProductCategoryId(productType, {
@@ -361,7 +407,7 @@ function createShopifyProduct(xmlData) {
   });
 
   const product = {
-    title: capitalizeText(xmlData.title), // Capitalize the product title
+    title: capitalizeText(cleanProductTitle(xmlData.title)), // Clean and capitalize the product title
     vendor: xmlData.brand,
     body_html: xmlData.description,
     handle: xmlData.code ? xmlData.code.toLowerCase().replace(/[^a-z0-9-]/g, '-') : undefined,
@@ -409,8 +455,8 @@ function createShopifyProduct(xmlData) {
     });
   }
 
-  // Process images and assign to variants based on color
-  if (xmlData.images?.image) {
+  // Process images and assign to variants based on color (skip for split products)
+  if (!skipImageProcessing && xmlData.images?.image) {
     const images = Array.isArray(xmlData.images.image) ? xmlData.images.image : [xmlData.images.image];
     
     // Create a map of color names to images
@@ -419,8 +465,8 @@ function createShopifyProduct(xmlData) {
       const colorName = cleanImageName(image.caption || image.name);
       if (colorName) {
         colorImageMap[colorName] = {
-          src: image.src,
-          alt: colorName,
+          src: cleanImageSrc(image.src), // Clean file name/URL (remove UUIDs)
+          alt: image.caption || image.name || 'Product Image', // Keep original alt text
           position: index + 1
         };
       }
@@ -547,5 +593,7 @@ module.exports = {
   splitProductBySize,
   extractCareInstructions,
   extractProductSpecs,
-  cleanImageName
+  cleanImageName,
+  cleanImageSrc,
+  cleanProductTitle
 }; 
