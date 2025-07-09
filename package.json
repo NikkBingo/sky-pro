@@ -1,0 +1,19 @@
+{
+  "name": "sky-pro-import",
+  "version": "1.0.0",
+  "description": "Simple import tool for Sky Pro products to Shopify",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "import": "node import-products.js",
+    "translate": "node import-translations.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "xml2js": "^0.6.2",
+    "dotenv": "^16.3.1"
+  },
+  "keywords": ["shopify", "import", "products", "translations"],
+  "author": "Sky Pro",
+  "license": "MIT"
+} 
