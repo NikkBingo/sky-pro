@@ -19,6 +19,8 @@ class ProductImporter {
     // Global caches for image deduplication (from app.import-products.jsx)
     this.globalMediaCache = new Map();
     this.urlToMediaCache = new Map();
+    // Add a cache for color to imageId mapping per product
+    this.productColorImageCache = new Map(); // productId -> { colorKey: imageId }
   }
 
   // Helper function to generate image identifier (from app.import-products.jsx)
@@ -112,218 +114,59 @@ class ProductImporter {
   async uploadImageWithShopifyFileSystem(productId, imageData, styleName) {
     try {
       const imageUrl = imageData.src;
-      const baseAlt = imageData.alt || styleName; // Use the color name from imageData.alt, fallback to styleName
-      
-      // Get original filename from image data or generate one
-      let originalFilename = '';
-      if (imageData.filename) {
-        originalFilename = imageData.filename;
+      const baseAlt = imageData.alt || styleName;
+      let originalFilename = imageData.filename || `${this.generateImageIdentifier(baseAlt)}.jpg`;
+      let productImageId = null;
+      // Upload directly to product images (no Shopify Files system)
+      console.log(`📤 Uploading image for Color: '${baseAlt}' directly to product`);
+      console.log(`  URL: ${imageUrl}`);
+      // Check if the image is already in the product's images array
+      const productImagesRes = await this.shopifyAPI.makeRequest('GET', `/products/${productId}/images.json`);
+      const productImages = productImagesRes.images || [];
+      // Debug: Log all existing images
+      console.log(`  📸 Current product images:`);
+      productImages.forEach((img, index) => {
+        console.log(`    ${index + 1}. Alt: "${img.alt || 'no alt'}" | ID: ${img.id} | Src: ${img.src}`);
+      });
+      // Check for existing image by URL AND alt text to avoid duplicates
+      const colorKey = baseAlt.toLowerCase().trim();
+      const alreadyPresent = productImages.find(img => {
+        const sameUrl = img.src === imageUrl;
+        const sameAlt = (img.alt || '').toLowerCase().trim() === colorKey;
+        return sameUrl || sameAlt;
+      });
+      if (alreadyPresent) {
+        productImageId = alreadyPresent.id;
+        console.log(`♻️ Product already has image: ${imageUrl} (id: ${productImageId})`);
+        console.log(`  Matched by: ${alreadyPresent.src === imageUrl ? 'URL' : 'Alt text'}`);
       } else {
-        // Fallback: generate filename from color name
-        originalFilename = `${this.generateImageIdentifier(baseAlt)}.jpg`;
-      }
-      
-      console.log(`📸 Processing image for ${baseAlt}: ${this.truncateForLog(imageUrl)}`);
-      console.log(`📸 Original filename: ${originalFilename}`);
-      
-      let mediaId = null;
-      
-      // Check global cache first (fastest)
-      if (this.globalMediaCache.has(baseAlt)) {
-        const cachedMedia = this.globalMediaCache.get(baseAlt);
-        console.log(`🚀 Found image in global cache for '${baseAlt}': ${cachedMedia.mediaId}`);
-        mediaId = cachedMedia.mediaId;
-      } 
-      // Check URL cache to prevent duplicate uploads of the same image URL
-      else if (this.urlToMediaCache.has(imageUrl)) {
-        const cached = this.urlToMediaCache.get(imageUrl);
-        console.log(`🚀 Reusing cached image for URL: ${this.truncateForLog(imageUrl)}`);
-        mediaId = cached.mediaId;
-      } else {
-        // Check if a file with this identifier already exists to avoid duplicates across runs
-        let existingNode = null;
-        
-        try {
-          // Enhanced search with more comprehensive queries (from app.import-products.jsx)
-          const searchQueries = [
-            `filename:"${originalFilename}"`, // Exact filename match (most reliable)
-            `alt:"${baseAlt}"`, // Exact alt text match
-            `alt:"${originalFilename}"`, // Alt text with filename
-            `"${baseAlt}"`, // Simple text search for alt
-            `"${originalFilename}"` // Simple filename search
-          ];
-          
-          // Try multiple search strategies to find existing media
-          for (const searchQ of searchQueries) {
-            console.log(`🔍 Searching for existing media with query: ${this.truncateForLog(searchQ)}`);
-            
-            const searchRes = await this.shopifyAPI.makeGraphQLRequest(
-              `query ($q: String!) { files(first: 50, query: $q) { edges { node { id alt ... on MediaImage { image { url } } } } } }`,
-              { q: searchQ }
-            );
-            
-            const edges = searchRes.data?.files?.edges || [];
-            console.log(`🔍 Search query '${this.truncateForLog(searchQ)}' returned ${edges.length} results`);
-            
-            if (edges.length > 0) {
-              // Look for exact matches first (by alt text or filename pattern)
-              for (const edge of edges) {
-                const node = edge.node;
-                const nodeAlt = node.alt || '';
-                const nodeUrl = node.image?.url || '';
-                
-                // Prefer files without UUID suffixes (original files)
-                const hasUUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(nodeUrl);
-                
-                // Check for exact matches
-                if (nodeAlt === baseAlt || nodeAlt === originalFilename) {
-                  if (!hasUUID || !existingNode) {
-                    existingNode = node;
-                    console.log(`✅ Found exact alt match: ${existingNode.id} (alt: '${nodeAlt}') ${hasUUID ? '[has UUID]' : '[original]'}`);
-                    if (!hasUUID) break; // Prefer original filename
-                  }
-                }
-                
-                // Check if the filename pattern matches (for images uploaded with custom filenames)
-                if (nodeAlt.includes(originalFilename) || nodeAlt.includes(baseAlt.replace(/\s+/g, '_'))) {
-                  if (!hasUUID || !existingNode) {
-                    existingNode = node;
-                    console.log(`✅ Found pattern match: ${existingNode.id} (alt: '${nodeAlt}') ${hasUUID ? '[has UUID]' : '[original]'}`);
-                    if (!hasUUID) break; // Prefer original filename
-                  }
-                }
-              }
-              
-              // If no exact match, use the first result as fallback (prefer non-UUID)
-              if (!existingNode && searchQ.includes('filename:')) {
-                // Find the first file without UUID, or fallback to first file
-                for (const edge of edges) {
-                  const node = edge.node;
-                  const nodeUrl = node.image?.url || '';
-                  const hasUUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(nodeUrl);
-                  
-                  if (!hasUUID) {
-                    existingNode = node;
-                    console.log(`✅ Using first non-UUID filename search result: ${existingNode.id} (alt: '${existingNode.alt || 'no alt'}')`);
-                    break;
-                  }
-                }
-                
-                // If all have UUIDs, use the first one
-                if (!existingNode) {
-                  existingNode = edges[0].node;
-                  console.log(`✅ Using first filename search result: ${existingNode.id} (alt: '${existingNode.alt || 'no alt'}')`);
-                }
-              }
-              
-              if (existingNode) break;
-            }
+        // Upload as classic product image
+        console.log(`📤 Uploading new image with alt: "${baseAlt}"`);
+        const uploadRes = await this.shopifyAPI.makeRequest('POST', `/products/${productId}/images.json`, {
+          image: {
+            src: imageUrl,
+            alt: baseAlt,
+            position: imageData.position
           }
-        } catch (searchErr) {
-          console.error("Media search failed", searchErr);
-          existingNode = null; // Reset so we upload new image
-        }
-
-        if (existingNode) {
-          // Re-use existing file and add to global cache
-          console.log(`♻️ Found existing media for '${baseAlt}', re-using (id: ${existingNode.id})`);
-          mediaId = existingNode.id;
-          
-          // Add to global cache for future use
-          this.globalMediaCache.set(baseAlt, {
-            mediaId: existingNode.id,
-            imageUrl: existingNode.image?.url || imageUrl,
-            altText: existingNode.alt || baseAlt
-          });
-          
-          // Also add to URL cache to prevent future duplicate uploads
-          this.urlToMediaCache.set(imageUrl, {
-            mediaId: existingNode.id,
-            imageUrl: existingNode.image?.url || imageUrl,
-            altText: existingNode.alt || baseAlt,
-            filename: existingNode.alt || originalFilename
-          });
-          
-          console.log(`🔗 Added existing file to URL cache: ${this.truncateForLog(imageUrl)} -> ${existingNode.id}`);
-          console.log(`✅ Successfully found existing media: ${existingNode.id} (added to cache)`);
-        }
-        
-        if (!existingNode) {
-          // Upload fresh image (first time we see this style or reuse failed) with custom filename
-          console.log(`📤 Uploading new image for Color: '${baseAlt}'`);
-          
-          try {
-            // First create the file with custom filename (from app.import-products.jsx)
-            const fileRes = await this.shopifyAPI.makeGraphQLRequest(
-              `mutation fileCreate($files: [FileCreateInput!]!) {
-                 fileCreate(files: $files) {
-                   files { id alt ... on MediaImage { image { url } } }
-                   userErrors { field message }
-                 }
-               }`,
-              {
-                files: [
-                  {
-                    originalSource: imageUrl,
-                    alt: baseAlt, // Use color name as alt text
-                    filename: originalFilename, // Use original filename
-                    contentType: "IMAGE",
-                  },
-                ],
-              }
-            );
-            const fileErrs = fileRes.data?.fileCreate?.userErrors || [];
-            if (fileErrs.length) {
-              console.error("File create errors", fileErrs);
-              throw new Error(`Image creation failed: ${fileErrs[0].message}`);
-            } else {
-              const createdFile = fileRes.data?.fileCreate?.files?.[0];
-              if (createdFile) {
-                console.log(`Image uploaded for URL: ${imageUrl} with alt text: "${baseAlt}"`);
-                mediaId = createdFile.id;
-                
-                // Add to global cache
-                this.globalMediaCache.set(baseAlt, {
-                  mediaId: createdFile.id,
-                  imageUrl: createdFile.image?.url || imageUrl,
-                  altText: createdFile.alt || baseAlt
-                });
-                
-                // Add to URL cache to prevent duplicate uploads of the same image URL
-                this.urlToMediaCache.set(imageUrl, {
-                  mediaId: createdFile.id,
-                  imageUrl: createdFile.image?.url || imageUrl,
-                  altText: createdFile.alt || baseAlt,
-                  filename: originalFilename
-                });
-                
-                console.log(`🔗 Added to URL cache: ${this.truncateForLog(imageUrl)} -> ${createdFile.id}`);
-                console.log(`✅ Successfully uploaded new image with filename '${originalFilename}': ${createdFile.id} (added to cache)`);
-              }
-            }
-          } catch (uploadErr) {
-            console.error("Image upload failed", uploadErr);
-            throw new Error(`Image upload failed: ${uploadErr.message}`);
-          }
-        }
-      }
-      
-      // Attach the image to the product
-      if (mediaId) {
-        console.log(`📎 Attaching image ${mediaId} to product ${productId}`);
-        
-        const attachSuccess = await this.attachMediaWithRetry(mediaId, productId);
-        if (attachSuccess) {
-          console.log(`✅ Successfully attached image to product: ${productId}`);
-          return mediaId;
+        });
+        if (uploadRes.image && uploadRes.image.id) {
+          productImageId = uploadRes.image.id;
+          console.log(`✅ Uploaded image to product: ${imageUrl} (id: ${productImageId})`);
         } else {
-          console.error(`❌ Failed to attach image to product: ${productId}`);
-          throw new Error(`Failed to attach image to product: ${productId}`);
+          throw new Error('Failed to upload image as product image');
         }
       }
-      
-      return null;
-      
+      // Cache the image ID for this color for this product
+      if (!this.productColorImageCache.has(productId)) {
+        this.productColorImageCache.set(productId, {});
+      }
+      const colorCache = this.productColorImageCache.get(productId);
+      if (!colorCache[colorKey]) {
+        colorCache[colorKey] = productImageId;
+        console.log(`🗂️ Cached image ID ${productImageId} for color '${colorKey}' on product ${productId}`);
+      }
+      // Return the product image ID for variant assignment
+      return productImageId;
     } catch (error) {
       console.error(`❌ Error in uploadImageWithShopifyFileSystem:`, error.message);
       throw error;
@@ -409,8 +252,45 @@ class ProductImporter {
               }
             }
             
-            // If this was a split product, create Product Grouping entry and handle images properly
-            if (shopifyProducts.length > 1) {
+            // Handle images for all products (both single and split)
+            if (shopifyProducts.length === 1) {
+              // Single product - upload images to product first
+              const product = createdProducts[0];
+              const productData = shopifyProducts[0];
+              
+              console.log(`📸 Processing images for single product: ${product.title}`);
+              
+              if (productData.images && productData.images.length > 0) {
+                // Upload images in batches to avoid overwhelming the API
+                const batchSize = 5;
+                for (let i = 0; i < productData.images.length; i += batchSize) {
+                  const batch = productData.images.slice(i, i + batchSize);
+                  
+                  console.log(`📤 Uploading batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(productData.images.length / batchSize)} (${batch.length} images)`);
+                  
+                  for (const imageData of batch) {
+                    await this.uploadImageWithShopifyFileSystem(product.id, imageData, productData.title);
+                    await this.sleep(500); // 500ms delay for image uploads
+                  }
+                  
+                  // Wait between batches
+                  if (i + batchSize < productData.images.length) {
+                    console.log(`⏳ Waiting 2 seconds between batches...`);
+                    await this.sleep(2000); // 2 seconds between batches
+                  }
+                }
+                
+                // Add a delay to ensure images are processed before variant assignment
+                console.log(`⏳ Waiting 3 seconds for images to be processed before assigning variant images...`);
+                await this.sleep(3000);
+              }
+              
+              // Assign variant images using product's uploaded images
+              console.log(`📸 Assigning variant images to product ${product.title}`);
+              await this.assignVariantImages(product.id);
+              await this.sleep(1000);
+            } else {
+              // Split products - upload images to first product, then reference to others
               const originalTitle = xmlProduct.title;
               const splitProductName = shopifyProducts[0].title.split(' - ')[0]; // Get the base name without size
               
@@ -424,8 +304,12 @@ class ProductImporter {
                 console.log(`✅ Created Product Grouping metaobject: ${groupingInfo.id}`);
               }
               
-              // NEW IMAGE HANDLING: Use Shopify file system approach
-              console.log(`📸 Processing images for split products using Shopify file system...`);
+              // Upload images to the first split product
+              console.log(`📸 Processing images for split products...`);
+              
+              // Get the first split product
+              const firstProduct = createdProducts[0];
+              const firstProductData = shopifyProducts[0];
               
               // Step 1: Upload all images to the first split product
               console.log(`📸 Step 1: Uploading all images to first split product: ${firstProduct.title}`);
@@ -439,13 +323,13 @@ class ProductImporter {
                   
                   for (const imageData of batch) {
                     await this.uploadImageWithShopifyFileSystem(firstProduct.id, imageData, firstProductData.title);
-                    await this.sleep(200); // 200ms delay for split product image uploads
+                    await this.sleep(500); // 500ms delay for split product image uploads
                   }
                   
                   // Wait between batches
                   if (i + batchSize < firstProductData.images.length) {
-                    console.log(`⏳ Waiting 1 second between batches...`);
-                    await this.sleep(1000);
+                    console.log(`⏳ Waiting 2 seconds between batches...`);
+                    await this.sleep(2000); // 2 seconds between batches
                   }
                 }
                 
@@ -461,7 +345,7 @@ class ProductImporter {
               // Assign variant images to first split product after images are uploaded
               if (updatedFirstProduct.images && updatedFirstProduct.images.length > 0) {
                 console.log(`📸 Assigning variant images to first split product ${firstProduct.title}`);
-                await this.assignVariantImages(firstProduct.id, firstProductData.variants);
+                await this.assignVariantImages(firstProduct.id);
                 await this.sleep(1000);
               }
               
@@ -487,7 +371,7 @@ class ProductImporter {
                 // Assign variant images after all images are uploaded
                 if (updatedProduct.images && updatedProduct.images.length > 0) {
                   console.log(`📸 Assigning variant images to split product ${product.title}`);
-                  await this.assignVariantImages(product.id, productData.variants);
+                  await this.assignVariantImages(product.id);
                   await this.sleep(1000);
                 }
                 
@@ -918,17 +802,36 @@ class ProductImporter {
         return;
       }
       
-      // Reference the same images by ID instead of copying
+      // Check if target product already has images to avoid duplicates
+      const targetImagesResponse = await this.shopifyAPI.makeRequest('GET', `/products/${targetProductId}/images.json`);
+      const targetImages = targetImagesResponse.images || [];
+      
+      // Reference the same images by uploading with the same source URL (Shopify will reuse existing images)
       for (const image of sourceImages) {
-        await this.shopifyAPI.makeRequest('POST', `/products/${targetProductId}/images.json`, {
+        // Check if image already exists in target product
+        const alreadyExists = targetImages.find(img => img.src === image.src);
+        if (alreadyExists) {
+          console.log(`♻️ Image already exists in target product: ${image.alt || image.src} (ID: ${alreadyExists.id})`);
+          continue;
+        }
+        
+        // Upload with same source URL - Shopify will reuse the existing image
+        const uploadResponse = await this.shopifyAPI.makeRequest('POST', `/products/${targetProductId}/images.json`, {
           image: {
-            id: image.id, // Reference the same image ID
             src: image.src,
             alt: image.alt,
             position: image.position
           }
         });
-        console.log(`  ✅ Referenced image: ${image.alt || image.src} (ID: ${image.id})`);
+        
+        if (uploadResponse.image && uploadResponse.image.id) {
+          console.log(`✅ Referenced image: ${image.alt || image.src} (ID: ${uploadResponse.image.id})`);
+        } else {
+          console.warn(`⚠️ Failed to reference image: ${image.alt || image.src}`);
+        }
+        
+        // Add small delay between image references
+        await this.sleep(200);
       }
       
       console.log(`✅ Successfully referenced ${sourceImages.length} images from product ${sourceProductId} to product ${targetProductId}`);
@@ -997,7 +900,7 @@ class ProductImporter {
         // Assign variant images after all images are uploaded
         if (updatedProduct.images && updatedProduct.images.length > 0) {
           console.log(`📸 Assigning variant images to product ${createdProduct.title}`);
-          await this.assignVariantImages(createdProduct.id, productData.variants);
+          await this.assignVariantImages(createdProduct.id);
           await this.sleep(1000);
         }
       }
@@ -1072,7 +975,7 @@ class ProductImporter {
         // Assign variant images after all images are uploaded
         if (updatedProductWithImages.images && updatedProductWithImages.images.length > 0) {
           console.log(`📸 Assigning variant images to updated product ${updatedProduct.title}`);
-          await this.assignVariantImages(productId, productData.variants);
+          await this.assignVariantImages(productId);
           await this.sleep(1000);
         }
       }
@@ -1220,79 +1123,106 @@ class ProductImporter {
     }
   }
 
-  async assignVariantImages(productId, originalVariants) {
+  async assignVariantImages(productId) {
     try {
-      console.log(`📸 Starting variant image assignment for product ${productId}`);
-      console.log(`📊 Found ${originalVariants?.length || 0} variants`);
-      
-      // Get the current product to access variants and actual uploaded images
-      const productResponse = await this.shopifyAPI.makeRequest('GET', `/products/${productId}.json`);
-      const product = productResponse.product;
-      
-      if (!product.variants || product.variants.length === 0) {
-        console.log(`⚠️ No variants found for product ${productId}`);
+      console.log(`🎨 Assigning variant images for product ${productId}...`);
+      // Get the product with all its images
+      const productRes = await this.shopifyAPI.makeRequest('GET', `/products/${productId}.json`);
+      const product = productRes.product;
+      const images = product.images || [];
+      if (images.length === 0) {
+        console.log(`⚠️ No images found for product ${productId}`);
         return;
       }
-      
-      // Get the actual uploaded images from the product
-      const actualImages = product.images || [];
-      console.log(`📸 Found ${actualImages.length} uploaded images in product`);
-      
-      if (actualImages.length === 0) {
-        console.log(`⚠️ No uploaded images found in product ${productId}`);
-        return;
-      }
-      
-      // Create a map of color names to image IDs from the actual uploaded images
-      const colorImageMap = {};
-      
-      // Map images by their alt text (color name)
-      actualImages.forEach(image => {
-        if (image.alt) {
-          const colorName = image.alt.trim();
-          colorImageMap[colorName] = image.id;
-          console.log(`  🎨 Mapped color "${colorName}" to image ID: ${image.id}`);
-        }
+      // Debug: Log all images and their alt text
+      console.log(`🔍 Available images:`);
+      images.forEach((img, index) => {
+        console.log(`  ${index + 1}. Alt: "${img.alt || 'no alt'}" | ID: ${img.id} | Src: ${img.src}`);
       });
-      
-      console.log(`📋 Available colors in product images: ${Object.keys(colorImageMap).join(', ')}`);
-      
-      // Update variants with their corresponding images using GraphQL methods
+      // Get all variants
+      const variants = product.variants || [];
+      console.log(`🔍 Processing ${variants.length} variants`);
       let assignedCount = 0;
-      
-      for (const variant of product.variants) {
-        // Try to match variant by color option (option1 is typically color)
-        const variantColor = variant.option1;
-        const matchingImageId = colorImageMap[variantColor];
-        
-        console.log(`  🔍 Variant ${variant.id} (${variantColor}) -> image: ${matchingImageId || 'NOT FOUND'}`);
-        
-        if (matchingImageId) {
-          const assignmentResult = await this.assignImageToVariant(productId, variant.id, matchingImageId);
-          if (assignmentResult.success) {
-            assignedCount++;
-            console.log(`  ✅ Successfully assigned image to variant ${variant.id} (${variantColor})`);
-          } else {
-            console.log(`  ⚠️ Failed to assign image to variant ${variant.id} (${variantColor})`);
+      // Use the color-to-image cache for this product
+      const colorCache = this.productColorImageCache.get(productId) || {};
+      for (const variant of variants) {
+        const colorOption = variant.option1; // Assuming color is option1
+        if (!colorOption) {
+          console.log(`⚠️ Variant ${variant.id} has no color option`);
+          continue;
+        }
+        const colorKey = colorOption.toLowerCase().trim();
+        console.log(`🎨 Looking for image matching variant color: "${colorOption}" (key: '${colorKey}')`);
+        // Use cache first
+        let matchingImageId = colorCache[colorKey];
+        if (!matchingImageId) {
+          // Fallback: find matching image by alt text
+          const matchingImage = images.find(img => (img.alt || '').toLowerCase().trim() === colorKey);
+          if (matchingImage) {
+            matchingImageId = matchingImage.id;
+            // Update cache for future
+            colorCache[colorKey] = matchingImageId;
+            console.log(`🗂️ Updated cache with image ID ${matchingImageId} for color '${colorKey}'`);
           }
-          
-          // Rate limiting: wait 1000ms between variant assignments (Shopify limit: 2 calls/second)
-          await this.sleep(1000);
+        }
+        if (matchingImageId) {
+          console.log(`✅ Found image ID ${matchingImageId} for variant ${variant.id} (${colorOption})`);
+          // Check if variant already has the correct image assigned
+          if (variant.image_id === matchingImageId) {
+            console.log(`✅ Variant ${variant.id} already has correct image assigned`);
+            assignedCount++;
+            continue;
+          }
+          // Update variant with image_id
+          try {
+            await this.shopifyAPI.makeRequest('PUT', `/variants/${variant.id}.json`, {
+              variant: {
+                id: variant.id,
+                image_id: matchingImageId
+              }
+            });
+            console.log(`✅ Assigned image ${matchingImageId} to variant ${variant.id}`);
+            assignedCount++;
+            // Add delay between variant updates
+            await this.delay(200);
+          } catch (error) {
+            console.error(`❌ Failed to assign image to variant ${variant.id}:`, error.message);
+          }
+        } else {
+          console.log(`⚠️ No matching image found for variant ${variant.id} (${colorOption})`);
+          console.log(`  Available alt texts: ${images.map(img => `"${img.alt || 'no alt'}"`).join(', ')}`);
         }
       }
-      
-      console.log(`🎯 Variant image assignment completed for product ${productId}: ${assignedCount} variants assigned`);
+      console.log(`✅ Assigned images to ${assignedCount} variants for product ${productId}`);
     } catch (error) {
-      console.warn(`  ⚠️ Could not assign variant images:`, error.message);
+      console.error(`❌ Error assigning variant images for product ${productId}:`, error.message);
     }
   }
 
-  async assignImageToVariant(productId, variantId, mediaId) {
+  async assignImageToVariant(productId, variantId, imageId) {
     try {
       console.log(`🔗 Attempting to assign image to variant via GraphQL`);
       console.log(`🔗 Product: ${productId}`);
       console.log(`🔗 Variant: ${variantId}`);
-      console.log(`🔗 Media: ${mediaId}`);
+      console.log(`🔗 Image: ${imageId}`);
+      
+      // Convert IDs to GID format for GraphQL
+      const productGid = `gid://shopify/Product/${productId}`;
+      const variantGid = `gid://shopify/ProductVariant/${variantId}`;
+      const imageGid = `gid://shopify/ProductImage/${imageId}`;
+      
+      console.log(`🔗 Product GID: ${productGid}`);
+      console.log(`🔗 Variant GID: ${variantGid}`);
+      console.log(`🔗 Image GID: ${imageGid}`);
+      
+      // First, verify the product exists
+      try {
+        const productCheck = await this.shopifyAPI.makeRequest('GET', `/products/${productId}.json`);
+        console.log(`✅ Product ${productId} exists: ${productCheck.product.title}`);
+      } catch (productError) {
+        console.error(`❌ Product ${productId} does not exist or is inaccessible:`, productError.message);
+        return { success: false, method: 'product_not_found', error: 'Product does not exist' };
+      }
       
       // Try Method 1: productVariantAppendMedia (the correct approach)
       console.log(`🔄 Method 1: Trying productVariantAppendMedia...`);
@@ -1315,10 +1245,10 @@ class ProductImporter {
             }
           }`,
           {
-            productId: productId,
+            productId: productGid,
             variantMedia: [{
-              variantId: variantId,
-              mediaIds: [mediaId]
+              variantId: variantGid,
+              mediaIds: [imageGid]
             }]
           }
         );
@@ -1339,8 +1269,8 @@ class ProductImporter {
         console.log(`⚠️ Method 1 failed:`, appendError.message);
       }
 
-      // Try Method 2: productVariantsBulkUpdate with media parameter
-      console.log(`🔄 Method 2: Trying productVariantsBulkUpdate with media...`);
+      // Try Method 2: productVariantsBulkUpdate (without imageId field)
+      console.log(`🔄 Method 2: Trying productVariantsBulkUpdate...`);
       
       try {
         const bulkUpdateResponse = await this.shopifyAPI.makeGraphQLRequest(
@@ -1360,10 +1290,10 @@ class ProductImporter {
             }
           }`,
           {
-            productId: productId,
+            productId: productGid,
             variants: [{
-              id: variantId,
-              imageId: mediaId // Use the media ID directly
+              id: variantGid
+              // Note: imageId field is not available in ProductVariantsBulkInput
             }]
           }
         );
@@ -1406,8 +1336,8 @@ class ProductImporter {
           }`,
           {
             input: {
-              id: variantId,
-              imageId: mediaId
+              id: variantGid,
+              imageId: imageGid
             }
           }
         );
@@ -1436,7 +1366,70 @@ class ProductImporter {
     }
   }
 
+  async attachMediaToProduct(productId, mediaId) {
+    try {
+      console.log(`🔗 Attaching media ${mediaId} to product ${productId}`);
+      
+      const productGid = `gid://shopify/Product/${productId}`;
+      const mediaGid = `gid://shopify/MediaImage/${mediaId}`;
+      
+      console.log(`🔗 Product GID: ${productGid}`);
+      console.log(`🔗 Media GID: ${mediaGid}`);
+      
+      const response = await this.shopifyAPI.makeGraphQLRequest(
+        `mutation productAppendMedia($productId: ID!, $mediaIds: [ID!]!) {
+          productAppendMedia(productId: $productId, mediaIds: $mediaIds) {
+            product {
+              id
+              images {
+                id
+                src
+                alt
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }`,
+        {
+          productId: productGid,
+          mediaIds: [mediaGid]
+        }
+      );
+
+      console.log(`🔗 Attachment response:`, JSON.stringify(response, null, 2));
+
+      if (response.errors) {
+        console.log(`⚠️ GraphQL errors when attaching media:`, response.errors);
+        return false;
+      }
+      
+      if (response.data?.productAppendMedia?.userErrors?.length > 0) {
+        console.log(`⚠️ User errors when attaching media:`, response.data.productAppendMedia.userErrors);
+        return false;
+      }
+      
+      if (response.data?.productAppendMedia?.product?.images) {
+        console.log(`✅ Successfully attached media ${mediaId} to product ${productId}`);
+        console.log(`📸 Product now has ${response.data.productAppendMedia.product.images.length} images`);
+        return true;
+      } else {
+        console.log(`⚠️ No product data returned from attachment`);
+        return false;
+      }
+    } catch (error) {
+      console.error(`❌ Error attaching media to product:`, error.message);
+      return false;
+    }
+  }
+
   sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

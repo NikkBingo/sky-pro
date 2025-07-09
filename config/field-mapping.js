@@ -375,14 +375,9 @@ function splitProductBySize(xmlData) {
         splitProduct.title = `${splitProduct.title} - ${size}`;
         splitProduct.handle = `${splitProduct.handle}-size-${size.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
         
-        // Override the images with the cleaned versions to prevent UUID duplication
-        if (allProductImages.length > 0) {
-          splitProduct.images = allProductImages;
-          console.log(`📸 Using all ${allProductImages.length} cleaned product images for split product ${index + 1} (${size})`);
-        } else {
-          splitProduct.images = [];
-          console.log(`📸 No product images available for split product ${index + 1} (${size})`);
-        }
+        // DO NOT include images in split products initially - they will be added after import
+        splitProduct.images = [];
+        console.log(`📸 Split product ${index + 1} (${size}) created without images - will be added after import`);
         
         // Product Grouping metafields will be added after product creation
         // to ensure proper GID references and grouping structure
