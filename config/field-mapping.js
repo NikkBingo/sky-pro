@@ -294,6 +294,20 @@ function splitProductBySize(xmlData) {
     return [createShopifyProduct(xmlData)];
   }
   
+  // Get the main product image (first image) to use for all split products
+  let mainProductImage = null;
+  if (xmlData.images?.image) {
+    const images = Array.isArray(xmlData.images.image) ? xmlData.images.image : [xmlData.images.image];
+    if (images.length > 0) {
+      const firstImage = images[0];
+      mainProductImage = {
+        src: firstImage.src,
+        alt: cleanImageName(firstImage.caption || firstImage.name) || 'Product Image',
+        position: 1
+      };
+    }
+  }
+  
   sizes.forEach((size, index) => {
     // Only create product if we have variants for this size
     if (variantsBySize[size].length > 0) {
@@ -318,10 +332,13 @@ function splitProductBySize(xmlData) {
         splitProduct.title = `${splitProduct.title} - ${size}`;
         splitProduct.handle = `${splitProduct.handle}-size-${size.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
         
-        // Only include images in the first split product to avoid duplication
-        if (index > 0) {
+        // Set the same main product image for all split products
+        if (mainProductImage) {
+          splitProduct.images = [mainProductImage];
+          console.log(`📸 Using main product image for split product ${index + 1} (${size})`);
+        } else {
           splitProduct.images = [];
-          console.log(`📸 Skipping images for split product ${index + 1} (${size}) - images will be reused from first product`);
+          console.log(`📸 No main product image available for split product ${index + 1} (${size})`);
         }
         
         // Add Product Grouping metafields
