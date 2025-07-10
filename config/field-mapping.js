@@ -448,6 +448,7 @@ function createShopifyProduct(xmlData, skipImageProcessing = false) {
     handle: xmlData.code ? xmlData.code.toLowerCase().replace(/[^a-z0-9-]/g, '-') : undefined,
     product_type: xmlData.categories?.category?.[2]?.name || 'Apparel', // Product Category
     template_suffix: 'sky-pro', // Set Product Template to sky-pro
+    template: 'sky-pro', // Set Theme Template to sky-pro
     tags: (xmlData.categories?.category?.map(cat => cat.name).join(', ') + ', Sky Pro Importer').trim(),
     status: 'draft', // Set as draft for review before publishing
     variants: [],

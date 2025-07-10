@@ -660,8 +660,9 @@ class ProductImporter {
       const productArray = filteredProducts;
       console.log(`🔄 Processing ${Math.min(limit, productArray.length)} products...`);
       
-      // All metafield definitions already exist - skipping creation
-      console.log('✅ All metafield definitions already exist - skipping creation');
+      // Ensure all metafield definitions exist (including grouping definitions)
+      console.log('🔧 Ensuring all metafield definitions exist...');
+      await this.createProductGroupingDefinitions();
       
       let successCount = 0;
       let errorCount = 0;
@@ -779,7 +780,7 @@ class ProductImporter {
                   
                   // Update the Product Grouping metaobject with all product references
                   const productIds = createdProducts.map(product => product.id);
-                  const updateSuccess = await this.updateProductGroupingWithProducts(groupingInfo.id, productIds);
+                  const updateSuccess = await this.updateProductGroupingWithProducts(groupingInfo.id, productIds, splitProductName);
                   
                   if (updateSuccess) {
                     console.log(`✅ Successfully updated Product Grouping metaobject with ${productIds.length} product references`);
@@ -1478,14 +1479,14 @@ class ProductImporter {
           key: 'product_grouping_option_1',
           name: 'Product Grouping Option 1',
           type: 'metaobject_reference',
-          owner_resource: 'product'
+          ownerType: 'PRODUCT'
         },
         {
           namespace: 'stanley_stella',
           key: 'product_grouping_option_1_value',
           name: 'Product Grouping Option 1 Value',
           type: 'single_line_text_field',
-          owner_resource: 'product'
+          ownerType: 'PRODUCT'
         }
       ];
       
@@ -1663,7 +1664,7 @@ class ProductImporter {
     }
   }
 
-  async updateProductGroupingWithProducts(metaobjectId, productIds) {
+  async updateProductGroupingWithProducts(metaobjectId, productIds, groupingName) {
     try {
       console.log(`🔗 Updating Product Grouping metaobject ${metaobjectId} with ${productIds.length} product references`);
       
@@ -1692,7 +1693,7 @@ class ProductImporter {
         id: metaobjectId,
         metaobject: {
           fields: [
-            { key: "grouping_name", value: "Product Grouping" },
+            { key: "grouping_name", value: groupingName },
             { key: "products", value: productGids.join(',') },
             { key: "product_count", value: productIds.length.toString() }
           ]
