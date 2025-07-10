@@ -32,8 +32,9 @@ const fieldMapping = {
 
   // Categories and types mapping
   categories: {
-    'categories.category.0.name': 'product_category',
-    'categories.category.1.name': 'metafields.stanley_stella.category',
+    'categories.category.0.name': 'metafields.stanley_stella.product_category',
+    'categories.category.1.name': 'metafields.stanley_stella.type',
+    'categories.category.2.name': 'metafields.stanley_stella.subtype', // Optional third category
     'categories.category.0.id': 'metafields.stanley_stella.categorycode',
     'types.type.name': 'type',
     'types.type.id': 'metafields.stanley_stella.typecode'
@@ -101,7 +102,9 @@ const fieldMapping = {
     
     // Product categorization
     'brand': 'metafields.stanley_stella.brand',
-    'categories.category.0.name': 'metafields.stanley_stella.category',
+    'categories.category.0.name': 'metafields.stanley_stella.product_category',
+    'categories.category.1.name': 'metafields.stanley_stella.type',
+    'categories.category.2.name': 'metafields.stanley_stella.subtype', // Optional third category
     'categories.category.0.id': 'metafields.stanley_stella.categorycode',
     'types.type.name': 'metafields.stanley_stella.type',
     'types.type.id': 'metafields.stanley_stella.typecode',
@@ -439,12 +442,13 @@ function createShopifyProduct(xmlData, skipImageProcessing = false) {
   });
 
   const product = {
-    title: capitalizeText(cleanProductTitle(xmlData.title)), // Clean and capitalize the product title
-    vendor: xmlData.brand,
-    body_html: xmlData.description,
+    title: capitalizeText(cleanProductTitle(xmlData.title)), // Title
+    vendor: xmlData.brand, // Vendor
+    body_html: xmlData.description + (xmlData.sizetable ? '\n\n<div class="size-table">\n<h3 style="background-color: #666; color: white; padding: 10px; margin: 0; border-radius: 5px 5px 0 0;">Size Guide</h3>\n<div style="background: linear-gradient(to bottom, #f8f8f8 0%, #f8f8f8 50%, white 50%, white 100%);">' + xmlData.sizetable + '</div>\n</div>' : ''), // Body (HTML) - description + styled sizetable with zebra stripes
     handle: xmlData.code ? xmlData.code.toLowerCase().replace(/[^a-z0-9-]/g, '-') : undefined,
-    product_type: productType,
-    tags: (xmlData.categories?.category?.map(cat => cat.name).join(', ') + ', Sky Pro Importer').trim(), // Added Sky Pro Importer tag
+    product_type: xmlData.categories?.category?.[2]?.name || 'Apparel', // Product Category
+    template_suffix: 'sky-pro', // Set Product Template to sky-pro
+    tags: (xmlData.categories?.category?.map(cat => cat.name).join(', ') + ', Sky Pro Importer').trim(),
     status: 'draft', // Set as draft for review before publishing
     variants: [],
     options: [
@@ -473,7 +477,10 @@ function createShopifyProduct(xmlData, skipImageProcessing = false) {
         inventory_policy: variant.available === '0' ? 'deny' : 'continue',
         option1: variant.color_name, // Color
         option2: variant.size, // Size
+        metafields: [] // Initialize metafields array for this variant
       };
+      
+
       
       product.variants.push(shopifyVariant);
       
@@ -516,111 +523,41 @@ function createShopifyProduct(xmlData, skipImageProcessing = false) {
     });
   }
 
-  // Process metafields
-  const careInstructions = extractCareInstructions(xmlData.description);
-  const productSpecs = extractProductSpecs(xmlData.description);
+  // Process metafields from XML data - only create required fields
+  const metafields = [];
   
-  // Add product metafields
-  const productMetafields = [
-    { namespace: 'stanley_stella', key: 'brand_id', value: xmlData.brandID || '', type: 'single_line_text_field' },
-    { namespace: 'stanley_stella', key: 'piecesperbox', value: xmlData.package || '', type: 'number_integer' },
-    { namespace: 'stanley_stella', key: 'piecesperpolybag', value: xmlData.salesunit || '', type: 'number_integer' },
-    { namespace: 'stanley_stella', key: 'category', value: xmlData.categories?.category?.[0]?.name || '', type: 'single_line_text_field' },
-    { namespace: 'stanley_stella', key: 'categorycode', value: xmlData.categories?.category?.[0]?.id || '', type: 'single_line_text_field' },
-    { namespace: 'stanley_stella', key: 'type', value: xmlData.categories?.category?.[1]?.name || '', type: 'single_line_text_field' },
-    { namespace: 'stanley_stella', key: 'typecode', value: xmlData.categories?.category?.[1]?.id || '', type: 'single_line_text_field' },
-    { namespace: 'stanley_stella', key: 'stylecode', value: xmlData.code || '', type: 'single_line_text_field' },
-    { namespace: 'stanley_stella', key: 'longdescription', value: xmlData.description || '', type: 'multi_line_text_field' },
-    { namespace: 'stanley_stella', key: 'sizetable', value: xmlData.sizetable || '', type: 'multi_line_text_field' }
-  ];
-
-  // Add taxonomy metafields using the mapping functions
-  if (categoryId) {
-    productMetafields.push({ 
-      namespace: 'taxonomy', 
-      key: 'product_category', 
-      value: categoryId, 
-      type: 'single_line_text_field' 
-    });
-  }
-
-  // Only add care instruction metafields if they have values
-  if (careInstructions.washing) {
-    productMetafields.push({ namespace: 'stanley_stella', key: 'washing', value: careInstructions.washing, type: 'single_line_text_field' });
-  }
-  if (careInstructions.bleaching) {
-    productMetafields.push({ namespace: 'stanley_stella', key: 'bleaching', value: careInstructions.bleaching, type: 'single_line_text_field' });
-  }
-  if (careInstructions.ironing) {
-    productMetafields.push({ namespace: 'stanley_stella', key: 'ironing', value: careInstructions.ironing, type: 'single_line_text_field' });
-  }
-  if (careInstructions.drying) {
-    productMetafields.push({ namespace: 'stanley_stella', key: 'drying', value: careInstructions.drying, type: 'single_line_text_field' });
-  }
-  if (careInstructions.cleaning) {
-    productMetafields.push({ namespace: 'stanley_stella', key: 'cleaning', value: careInstructions.cleaning, type: 'single_line_text_field' });
-  }
-
-  // Only add product spec metafields if they have values
-  if (productSpecs.fit) {
-    productMetafields.push({ namespace: 'stanley_stella', key: 'fit', value: productSpecs.fit, type: 'number_integer' });
-  }
-  if (productSpecs.gauge) {
-    // Try to convert gauge to a number, if it's a numeric value
-    const gaugeValue = parseInt(productSpecs.gauge);
-    if (!isNaN(gaugeValue)) {
-      productMetafields.push({ namespace: 'stanley_stella', key: 'gauge', value: gaugeValue, type: 'number_integer' });
-    } else {
-      // If it's not a number, skip it to avoid type errors
-      console.warn(`Skipping gauge metafield - value "${productSpecs.gauge}" is not a valid number`);
-    }
-  }
-  if (productSpecs.neckline) {
-    productMetafields.push({ namespace: 'stanley_stella', key: 'neckline', value: productSpecs.neckline, type: 'single_line_text_field' });
-  }
-  if (productSpecs.sleeve) {
-    productMetafields.push({ namespace: 'stanley_stella', key: 'sleeve', value: productSpecs.sleeve, type: 'single_line_text_field' });
-  }
-
-  // Add taxonomy attribute metafields using mapping functions
-  // Map color taxonomy
-  if (xmlData.variants?.variant) {
-    const variants = Array.isArray(xmlData.variants.variant) ? xmlData.variants.variant : [xmlData.variants.variant];
-    const colors = [...new Set(variants.map(v => v.color_name).filter(Boolean))];
-    
-    if (colors.length > 0) {
-      const colorTaxonomyValues = colors.map(color => mapColorToTaxonomyValue(color)).filter(Boolean);
-      if (colorTaxonomyValues.length > 0) {
-        productMetafields.push({
-          namespace: 'taxonomy',
-          key: 'color_taxonomy',
-          value: JSON.stringify(colorTaxonomyValues),
-          type: 'json'
-        });
-      }
-    }
-  }
-
-  // Map fabric taxonomy if available
-  if (productSpecs.fit) {
-    const fabricTaxonomyValue = mapFabricToTaxonomyValue(productSpecs.fit);
-    if (fabricTaxonomyValue) {
-      productMetafields.push({
-        namespace: 'taxonomy',
-        key: 'fabric_taxonomy',
-        value: fabricTaxonomyValue,
-        type: 'single_line_text_field'
+  // Helper function to validate and add metafield
+  const addMetafield = (key, value, type) => {
+    if (value && value.toString().trim() !== '') {
+      metafields.push({
+        namespace: 'stanley_stella',
+        key: key,
+        value: value.toString().trim(),
+        type: type
       });
     }
+  };
+  
+  // Only create the specific metafields required
+  addMetafield('product_category', xmlData.categories?.category?.[0]?.name, 'single_line_text_field');
+  addMetafield('type', xmlData.categories?.category?.[1]?.name, 'single_line_text_field');
+  // Add third category if it exists
+  if (xmlData.categories?.category?.[2]?.name) {
+    addMetafield('subtype', xmlData.categories?.category?.[2]?.name, 'single_line_text_field');
   }
-
-  // Filter out empty metafields to avoid errors
-  product.metafields = productMetafields.filter(metafield => 
-    metafield.value !== null && metafield.value !== undefined && metafield.value !== ''
-  );
-
-  // SAFEGUARD: Remove any Product Grouping metafields if present (should only be added by splitProductBySize)
-  product.metafields = product.metafields.filter(mf => !mf.namespace.startsWith('product_grouping_option_1'));
+  
+  // Add product grouping metafields if this is a split product
+  console.log(`🔍 Checking for split product data: splitSize=${xmlData.splitSize}, metaobjectId=${xmlData.productGroupingMetaobjectId}`);
+  if (xmlData.splitSize && xmlData.productGroupingMetaobjectId) {
+    console.log(`🔗 Adding product grouping metafields for split product: ${xmlData.splitSize}`);
+    console.log(`🔗 Metaobject ID: ${xmlData.productGroupingMetaobjectId}`);
+    addMetafield('product_grouping_option_1', xmlData.productGroupingMetaobjectId, 'metaobject_reference');
+    addMetafield('product_grouping_option_1_value', xmlData.splitSize, 'single_line_text_field');
+  } else {
+    console.log(`ℹ️ Single product - no grouping metafields needed`);
+  }
+  
+  product.metafields = metafields;
 
   return product;
 }

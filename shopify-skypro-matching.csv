@@ -1,0 +1,10 @@
+Field Name;XML
+Title;title
+Body (HTML);sizetable
+Vendor;brand
+Product Category;categories.category.2.name
+Type;categories.category.0.name
+SEO Title;title
+SEO Description;description
+Category (product.metafields.stanley_stella.category);categories.category.0.name
+Longdescription (product.metafields.stanley_stella.longdescription);description
