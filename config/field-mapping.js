@@ -289,6 +289,43 @@ function cleanImageSrc(src) {
   return urlParts.join('/');
 }
 
+// Helper function to generate descriptive filenames for better image matching
+function generateDescriptiveFilename(productName, colorName) {
+  // Clean and format product name
+  const cleanProductName = productName
+    .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special characters
+    .replace(/\s+/g, ' ') // Normalize spaces
+    .trim()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()) // Capitalize each word
+    .join(' ');
+  
+  // Clean and format color name
+  const cleanColorName = colorName
+    .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special characters
+    .replace(/\s+/g, ' ') // Normalize spaces
+    .trim()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()) // Capitalize each word
+    .join(' ');
+  
+  // Create descriptive filename based on the specified pattern
+  let filename = '';
+  
+  if (cleanColorName && cleanColorName.toLowerCase() !== 'product image') {
+    // Variant image: "Product Name + Color.jpg" (using + instead of -)
+    filename = `${cleanProductName} + ${cleanColorName}.jpg`;
+  } else {
+    // Main image: "Product Name.jpg"
+    filename = `${cleanProductName}.jpg`;
+  }
+  
+  // Ensure filename is URL-safe
+  filename = filename.replace(/[^a-zA-Z0-9\s\-\.\+]/g, '');
+  
+  return filename;
+}
+
 // Function to split products with over 100 variants by size
 function splitProductBySize(xmlData) {
   const variants = xmlData.variants?.variant ? 
@@ -457,11 +494,17 @@ function createShopifyProduct(xmlData, skipImageProcessing = false) {
     // Create a map of color names to images
     const colorImageMap = {};
     images.forEach((image, index) => {
-      const colorName = cleanImageName(image.caption || image.name);
+      // Use the actual image caption for color name
+      const colorName = image.caption || image.name || 'Product Image';
       if (colorName) {
+        // Generate descriptive filename for better matching
+        const productName = capitalizeText(cleanProductTitle(xmlData.title));
+        const descriptiveFilename = generateDescriptiveFilename(productName, colorName);
+        
         colorImageMap[colorName] = {
           src: cleanImageSrc(image.src), // Clean file name/URL (remove UUIDs)
-          alt: image.caption || image.name || 'Product Image', // Keep original alt text
+          alt: colorName, // Use the actual caption as alt text
+          filename: descriptiveFilename, // Add descriptive filename
           position: index + 1
         };
       }
@@ -590,5 +633,6 @@ module.exports = {
   extractProductSpecs,
   cleanImageName,
   cleanImageSrc,
-  cleanProductTitle
+  cleanProductTitle,
+  generateDescriptiveFilename
 }; 
