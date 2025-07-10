@@ -628,12 +628,7 @@ class ProductImporter {
     
     // Define categories to import
     const categoriesToImport = [
-      'Shopping Bags',
-      'Headwear and accessories', 
-      'Sweaters',
-      'T-shirts',
-      'Trousers and jog pants',
-      'Polos'
+      'Headwear and accessories'
     ];
     
     try {

@@ -495,6 +495,9 @@ function createShopifyProduct(xmlData, skipImageProcessing = false) {
     });
   }
 
+  // Remove empty options to avoid Shopify API errors
+  product.options = product.options.filter(option => option.values.length > 0);
+
   // Process images and assign to variants based on color (skip for split products)
   if (!skipImageProcessing && xmlData.images?.image) {
     const images = Array.isArray(xmlData.images.image) ? xmlData.images.image : [xmlData.images.image];
