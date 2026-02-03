@@ -64,6 +64,27 @@ node index.js translations
 node index.js translate
 ```
 
+### Update Translations (New Script)
+```bash
+# Update all translations
+node update-translations.js
+
+# Dry run to see what would be updated
+node update-translations.js --dry-run
+
+# Update only specific categories
+node update-translations.js --categories="Shopping Bags,Headwear"
+
+# Limit number of products to process
+node update-translations.js --limit=10
+
+# Force update existing translations
+node update-translations.js --force-update
+
+# Show help
+node update-translations.js --help
+```
+
 ### Import Everything (Products + Translations)
 ```bash
 node index.js all
@@ -116,6 +137,25 @@ MAX_PRODUCTS=5
 2. **Match Products**: Finds corresponding products in Shopify by product code
 3. **Import Translations**: Uploads Finnish translations to Shopify Translate & Adapt
 4. **Translate Variants**: Also translates variant options (colors, sizes)
+
+### Translation Update Process (New)
+
+The `update-translations.js` script provides more advanced translation management:
+
+1. **Fetch Finnish XML**: Downloads and parses the Finnish XML feed from `FINNISH_FEED_URL`
+2. **Get Shopify Products**: Retrieves all existing products from Shopify
+3. **Filter by Categories**: Optionally filters products by category tags
+4. **Match by Product Code**: Finds corresponding Finnish data using product codes
+5. **Check Existing Translations**: Determines if Finnish translation already exists
+6. **Create or Update**: Creates new translations or updates existing ones
+7. **Rate Limiting**: Includes delays to avoid API throttling
+
+**Key Features:**
+- **Dry Run Mode**: Test without making changes
+- **Category Filtering**: Process only specific product categories
+- **Limit Processing**: Control number of products processed
+- **Force Update**: Override existing translations
+- **Detailed Reporting**: Shows success, skipped, and error counts
 
 ## Data Mapping
 

@@ -5,15 +5,29 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "dev": "node index.js",
     "import": "node import-products.js",
-    "translate": "node import-translations.js"
+    "translate": "node import-translations.js",
+    "test-sizechart": "node test-sizechart-feed.js",
+    "update-sizecharts": "node update-sizechart-metafields.js",
+    "demo-sizechart": "node demo-sizechart-update.js",
+    "update-product": "node update-specific-product.js",
+    "update-product-efficient": "node update-specific-product-efficient.js",
+    "show-categories": "node show-shopify-categories.js",
+    "update-sizecharts-exclude-stanley": "node update-sizecharts-exclude-stanley.js",
+    "update-sizecharts-exclude-stanley-fast": "node update-sizecharts-exclude-stanley-fast.js",
+    "update-sizecharts-conservative": "node update-sizecharts-conservative.js",
+    "show-sizechart": "node show-specific-sizechart.js",
+    "show-non-stanley-categories": "node show-non-stanley-categories.js"
   },
   "dependencies": {
     "axios": "^1.6.0",
     "commander": "^14.0.0",
     "csv-parser": "^3.2.0",
+    "csv-writer": "^1.6.0",
     "dotenv": "^16.3.1",
-    "xml2js": "^0.6.2"
+    "xml2js": "^0.6.2",
+    "xmldom": "^0.6.0"
   },
   "keywords": [
     "shopify",

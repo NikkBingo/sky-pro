@@ -123,7 +123,12 @@ class TranslationImporter {
     };
     
     // Import translation
-    await this.shopify.createTranslation('products', shopifyProduct.id, 'fi', translationData);
+    await this.shopify.createTranslation({
+      resource_type: 'product',
+      resource_id: shopifyProduct.id,
+      locale: 'fi',
+      ...translationData
+    });
     
     // Also translate variant options if they exist
     await this.translateVariantOptions(shopifyProduct, finnishProduct);
@@ -139,6 +144,19 @@ class TranslationImporter {
       );
       if (productCodeMetafield) {
         return productCodeMetafield.value;
+      }
+    }
+    
+    // Try to extract from SKUs in variants
+    if (shopifyProduct.variants && shopifyProduct.variants.length > 0) {
+      for (const variant of shopifyProduct.variants) {
+        if (variant.sku) {
+          // Extract the main product code from SKU (e.g., "10330" from "1033040140")
+          const skuMatch = variant.sku.match(/^(\d{5})/);
+          if (skuMatch) {
+            return skuMatch[1];
+          }
+        }
       }
     }
     
@@ -175,12 +193,12 @@ class TranslationImporter {
         };
         
         try {
-          await this.shopify.createTranslation(
-            'variants', 
-            variant.id, 
-            'fi', 
-            translationData
-          );
+          await this.shopify.createTranslation({
+            resource_type: 'variant',
+            resource_id: variant.id,
+            locale: 'fi',
+            ...translationData
+          });
         } catch (error) {
           console.log(`⚠️  Could not translate variant ${variant.id}: ${error.message}`);
         }

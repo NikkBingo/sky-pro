@@ -1,0 +1,189 @@
+const fs = require('fs');
+
+function directLineExtract() {
+    console.log('🔍 Direct line extraction of size charts...\n');
+    
+    // Read the Finnish translations file
+    const finnishContent = fs.readFileSync('finnish-translations.csv', 'utf8');
+    const lines = finnishContent.split('\n');
+    
+    // Extract size charts by reading the specific lines where they appear
+    const sizeCharts = {};
+    
+    // Product 10360 size chart - read lines 87-174
+    console.log('📋 Extracting 10360 size chart from lines 87-174...');
+    const sizeChart10360 = extractSizeChartFromLines(lines, 87, 174);
+    sizeCharts['10360'] = sizeChart10360;
+    
+    // Product 10380 size chart - read lines 175-256
+    console.log('📋 Extracting 10380 size chart from lines 175-256...');
+    const sizeChart10380 = extractSizeChartFromLines(lines, 175, 256);
+    sizeCharts['10380'] = sizeChart10380;
+    
+    // Product 10440 size chart - read lines 257-338
+    console.log('📋 Extracting 10440 size chart from lines 257-338...');
+    const sizeChart10440 = extractSizeChartFromLines(lines, 257, 338);
+    sizeCharts['10440'] = sizeChart10440;
+    
+    // Log the results
+    for (const [productCode, sizeChart] of Object.entries(sizeCharts)) {
+        if (sizeChart.length > 0) {
+            console.log(`✅ Product ${productCode}: ${sizeChart.length} characters`);
+            console.log(`📏 Size chart ends: ${sizeChart.substring(sizeChart.length - 100)}`);
+        } else {
+            console.log(`❌ Product ${productCode}: No size chart found`);
+        }
+    }
+    
+    // Update the output CSV with the complete size charts
+    updateOutputCSVWithSizeCharts(sizeCharts);
+}
+
+function extractSizeChartFromLines(lines, startLine, endLine) {
+    // Join the lines in the range
+    const rangeContent = lines.slice(startLine - 1, endLine).join('\n');
+    
+    // Find the size table in the range
+    const sizeTableStart = rangeContent.indexOf('<div class="size-table">');
+    if (sizeTableStart === -1) {
+        console.log(`❌ No size table found in lines ${startLine}-${endLine}`);
+        return '';
+    }
+    
+    // Find the end of the size table by looking for the closing </div> tags
+    let depth = 0;
+    let endPos = sizeTableStart;
+    
+    for (let i = sizeTableStart; i < rangeContent.length; i++) {
+        const char = rangeContent[i];
+        
+        if (rangeContent.substring(i, i + 6) === '<div ') {
+            depth++;
+        } else if (rangeContent.substring(i, i + 7) === '</div>') {
+            depth--;
+            if (depth === 0) {
+                endPos = i + 7;
+                break;
+            }
+        }
+    }
+    
+    const sizeTable = rangeContent.substring(sizeTableStart, endPos);
+    
+    // Convert newlines to <br> for CSV compatibility
+    return sizeTable.replace(/\r?\n/g, '<br>');
+}
+
+function updateOutputCSVWithSizeCharts(sizeCharts) {
+    console.log('\n🔍 Updating output CSV with complete size charts...');
+    
+    // Read the output CSV as raw text
+    const outputContent = fs.readFileSync('KH-print_skypro_translated_complete.csv', 'utf8');
+    const lines = outputContent.split('\n');
+    
+    // Build product handle map
+    const productHandleMap = {};
+    for (const line of lines) {
+        if (line.includes(';handle;')) {
+            const parts = line.split(';');
+            if (parts.length >= 7) {
+                const productId = parts[1].replace("'", "");
+                const handle = parts[6].replace(/"/g, '');
+                productHandleMap[productId] = handle;
+            }
+        }
+    }
+    
+    // Process each line and embed complete size charts
+    const outLines = [];
+    outLines.push(lines[0]); // Header
+    
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line.trim()) continue;
+        
+        if (line.includes(';body_html;')) {
+            const parts = line.split(';');
+            if (parts.length >= 8) {
+                const productId = parts[1].replace("'", "");
+                const handle = productHandleMap[productId];
+                
+                if (handle) {
+                    const productCode = extractProductCode(handle);
+                    if (productCode && sizeCharts[productCode]) {
+                        console.log(`✅ Embedding complete size chart for handle ${handle} (product ${productCode})`);
+                        const content = parts[7];
+                        const sizeTableStart = content.indexOf('<div class="size-table">');
+                        if (sizeTableStart !== -1) {
+                            const description = content.substring(0, sizeTableStart).trim();
+                            const cleanDescription = description.replace(/(<br>)+$/, '');
+                            const newContent = cleanDescription + '<br><br>' + sizeCharts[productCode];
+                            parts[7] = escapeCellForLargeContent(newContent);
+                        }
+                    }
+                }
+                
+                parts[6] = escapeCellForLargeContent(parts[6]);
+                outLines.push(parts.join(';'));
+            } else {
+                outLines.push(line);
+            }
+        } else {
+            outLines.push(line);
+        }
+    }
+    
+    // Write the updated CSV using a different approach
+    writeCSVWithLargeCells(outLines);
+}
+
+function escapeCellForLargeContent(cell) {
+    if (!cell) return '';
+    
+    // Replace newlines with <br> for CSV compatibility
+    let out = cell.replace(/\r?\n/g, '<br>');
+    
+    // Escape quotes by doubling them
+    out = out.replace(/"/g, '""');
+    
+    // Wrap in quotes to handle large content
+    return '"' + out + '"';
+}
+
+function writeCSVWithLargeCells(lines) {
+    console.log('📝 Writing CSV with large cell support...');
+    
+    // Use a different approach: write line by line with proper encoding
+    const outputStream = fs.createWriteStream('KH-print_skypro_translated_complete.csv', {
+        encoding: 'utf8',
+        flags: 'w'
+    });
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        outputStream.write(line + '\n');
+        
+        // Log progress for large files
+        if (i % 100 === 0) {
+            console.log(`📝 Written ${i} lines...`);
+        }
+    }
+    
+    outputStream.end();
+    
+    // Wait for the stream to finish
+    outputStream.on('finish', () => {
+        console.log('✅ CSV written with large cell support.');
+        
+        // Verify the file was written correctly
+        const stats = fs.statSync('KH-print_skypro_translated_complete.csv');
+        console.log(`📊 File size: ${stats.size} bytes`);
+    });
+}
+
+function extractProductCode(handle) {
+    const match = handle.match(/^(\d+)/);
+    return match ? match[1] : null;
+}
+
+directLineExtract(); 
